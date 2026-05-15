@@ -22,11 +22,33 @@ from .results import (
     GridCandidateResult,
     StochasticCycle,
 )
+from .filters import (
+    apply_filter_dynamic,
+    apply_fractional_filter_single_series,
+    apply_multi_cycle_filter,
+    apply_single_cycle_filter,
+    compute_fractional_coefficients_dynamic,
+    compute_fractional_coefficients_multi_cycle,
+    compute_fractional_coefficients_single_cycle,
+    compute_mu,
+    filter_response_and_design,
+)
+from .regression import (
+    RegressionResult,
+    compute_residual_sum_squares,
+    compute_residuals,
+    compute_time_variance,
+    fit_filtered_regression,
+)
 from .spectral import (
     compute_document_periodogram,
+    compute_frequency_variance_dynamic,
+    compute_frequency_variance_multi_cycle,
+    compute_frequency_variance_single_cycle,
     compute_psi_dynamic,
     compute_psi_multi_cycle,
     compute_psi_single_cycle,
+    compute_residual_periodogram,
     compute_xaa_dynamic,
     compute_xaa_multi_cycle,
     compute_xaa_single_cycle,
@@ -68,4 +90,26 @@ __all__ = [
     "build_single_cycle_candidate_grid",
     "build_multi_cycle_candidate_grid",
     "candidate_iterator",
+    # filters — Wave 6
+    "compute_mu",
+    "compute_fractional_coefficients_single_cycle",
+    "compute_fractional_coefficients_multi_cycle",
+    "compute_fractional_coefficients_dynamic",
+    # filters — Wave 7
+    "apply_fractional_filter_single_series",
+    "apply_single_cycle_filter",
+    "apply_multi_cycle_filter",
+    "apply_filter_dynamic",
+    "filter_response_and_design",
+    # regression — Wave 8
+    "RegressionResult",
+    "fit_filtered_regression",
+    "compute_residuals",
+    "compute_residual_sum_squares",
+    "compute_time_variance",
+    # spectral — Wave 9
+    "compute_residual_periodogram",
+    "compute_frequency_variance_single_cycle",
+    "compute_frequency_variance_multi_cycle",
+    "compute_frequency_variance_dynamic",
 ]

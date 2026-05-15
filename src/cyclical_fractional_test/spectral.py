@@ -59,9 +59,9 @@ def compute_psi_single_cycle(
     R: int,
     drop_singular_frequency: bool = True,
 ) -> np.ndarray:
-    """Compute ψ(λ_j, R) = log(|2(cos(λ_j) − cos(λ_R))|) for j = 0, ..., T-1.
+    """Compute ψ(λ_j, R) = log(|2(cos(λ_j) - cos(λ_R))|) for j = 0, ..., T-1.
 
-    The expression is singular at j = R and at its mirrored frequency T−R.
+    The expression is singular at j = R and at its mirrored frequency T-R.
     When drop_singular_frequency=True, both positions are set to 0.0.
     """
     _validate_psi_single_cycle(T, R, drop_singular_frequency)
@@ -105,6 +105,63 @@ def compute_xaa_multi_cycle(psi_multi: np.ndarray) -> float:
     )
 
 
+def compute_residual_periodogram(residuals: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
+    """Compute the periodogram of the regression residuals.
+
+    Delegates to compute_document_periodogram; same normalisation I(λ_j) = |FFT|²/(2πT).
+    """
+    _validate_compute_residual_periodogram(residuals)
+    return compute_document_periodogram(residuals)
+
+
+def compute_frequency_variance_single_cycle(
+    I_residuals: np.ndarray,
+    R: int,
+    drop_frequency: bool = True,
+) -> float:
+    """Compute VAR*(R,D) = (2π/T) Σ_j I_residuals[j], optionally excluding j = R."""
+    _validate_compute_frequency_variance_single_cycle(I_residuals, R)
+    T = len(I_residuals)
+    mask = np.ones(T, dtype=bool)
+    if drop_frequency:
+        mask[R] = False
+    return float((2.0 * np.pi / T) * np.sum(I_residuals[mask]))
+
+
+def compute_frequency_variance_multi_cycle(
+    I_residuals: np.ndarray,
+    cycles: object,
+    drop_frequency: bool = True,
+) -> float:
+    """Compute VAR*(R,D) = (2π/T) Σ_j I_residuals[j], excluding j = R_q for all cycles."""
+    _validate_compute_frequency_variance_multi_cycle(I_residuals, cycles)
+    T = len(I_residuals)
+    mask = np.ones(T, dtype=bool)
+    if drop_frequency:
+        for cycle in cycles:
+            if 0 <= cycle.R < T:
+                mask[cycle.R] = False
+    return float((2.0 * np.pi / T) * np.sum(I_residuals[mask]))
+
+
+def compute_frequency_variance_dynamic(
+    I_residuals: np.ndarray,
+    cycles: tuple,
+    mode: str = "single",
+    drop_frequency: bool = True,
+) -> float:
+    """Dispatch to the single- or multi-cycle frequency variance based on mode.
+
+    "multi_peak_single_cycle" uses the single-cycle path; peak selection already happened upstream.
+    """
+    _validate_compute_frequency_variance_dynamic(cycles, mode)
+    if mode in ("single", "multi_peak_single_cycle"):
+        return compute_frequency_variance_single_cycle(
+            I_residuals, cycles[0].R, drop_frequency
+        )
+    return compute_frequency_variance_multi_cycle(I_residuals, cycles, drop_frequency)
+
+
 def compute_psi_dynamic(
     T: int,
     cycles: tuple,
@@ -138,7 +195,12 @@ def compute_xaa_dynamic(
         f"Unknown stochastic_cycle_mode: {stochastic_cycle_mode!r}."
     )
 
-# Local validation helpers.
+# ---------------------------------------------------------------------------
+# Validators
+# In this section we define the input validation for each of the functions of
+# this script, this way we ensure that in case of error, we know  the exact 
+# reason why the process failed.
+# ---------------------------------------------------------------------------
 
 
 def _validate_periodogram(periodogram: Any, min_length: int = 1) -> None:
@@ -220,6 +282,75 @@ def _validate_xaa_single_cycle(psi: Any) -> None:
             "psi contains non-finite values. "
             "Ensure compute_psi_single_cycle was called with "
             "drop_singular_frequency=True."
+        )
+
+
+def _validate_compute_residual_periodogram(residuals: Any) -> None:
+    if not isinstance(residuals, np.ndarray):
+        try:
+            residuals = np.asarray(residuals, dtype=float)
+        except (TypeError, ValueError) as exc:
+            raise InvalidConfigurationError(
+                f"residuals must be a numeric array: {exc}"
+            ) from exc
+    if residuals.ndim != 1 or residuals.size == 0:
+        raise InvalidConfigurationError("residuals must be a non-empty 1-D array.")
+    if not np.all(np.isfinite(residuals)):
+        raise InvalidConfigurationError("residuals contains non-finite values.")
+
+
+def _validate_compute_frequency_variance_single_cycle(
+    I_residuals: Any, R: int
+) -> None:
+    if not isinstance(I_residuals, np.ndarray):
+        try:
+            I_residuals = np.asarray(I_residuals, dtype=float)
+        except (TypeError, ValueError) as exc:
+            raise InvalidConfigurationError(
+                f"I_residuals must be a numeric array: {exc}"
+            ) from exc
+    if I_residuals.ndim != 1 or I_residuals.size == 0:
+        raise InvalidConfigurationError("I_residuals must be a non-empty 1-D array.")
+    T = len(I_residuals)
+    if isinstance(R, bool) or not isinstance(R, int):
+        raise InvalidConfigurationError(f"R must be an int, got {type(R).__name__}.")
+    if R < 0 or R >= T:
+        raise InvalidConfigurationError(f"R must satisfy 0 <= R < T={T}, got R={R}.")
+
+
+def _validate_compute_frequency_variance_multi_cycle(
+    I_residuals: Any, cycles: object
+) -> None:
+    if not isinstance(I_residuals, np.ndarray):
+        try:
+            I_residuals = np.asarray(I_residuals, dtype=float)
+        except (TypeError, ValueError) as exc:
+            raise InvalidConfigurationError(
+                f"I_residuals must be a numeric array: {exc}"
+            ) from exc
+    if I_residuals.ndim != 1 or I_residuals.size == 0:
+        raise InvalidConfigurationError("I_residuals must be a non-empty 1-D array.")
+    try:
+        cycle_list = list(cycles)
+    except TypeError as exc:
+        raise InvalidConfigurationError(
+            f"cycles must be iterable, got {type(cycles).__name__}."
+        ) from exc
+    if len(cycle_list) == 0:
+        raise InvalidConfigurationError("cycles must not be empty.")
+
+
+def _validate_compute_frequency_variance_dynamic(
+    cycles: tuple, mode: str
+) -> None:
+    _VALID_MODES = {"single", "multi_peak_single_cycle", "multi_cycle"}
+    if mode not in _VALID_MODES:
+        raise InvalidConfigurationError(
+            f"Unknown mode: {mode!r}. Expected one of {sorted(_VALID_MODES)}."
+        )
+    if mode in ("single", "multi_peak_single_cycle") and len(cycles) != 1:
+        raise InvalidCycleError(
+            f"mode={mode!r} requires exactly 1 cycle, got {len(cycles)}."
         )
 
 

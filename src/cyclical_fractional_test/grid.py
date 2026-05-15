@@ -73,7 +73,12 @@ def candidate_iterator(
     )
 
 
-# Local validation helpers.
+# ---------------------------------------------------------------------------
+# Validators
+# In this section we define the input validation for each of the functions of
+# this script, this way we ensure that in case of error, we know  the exact 
+# reason why the process failed.
+# ---------------------------------------------------------------------------
 
 
 def _validate_r_grid(r_star: int, r_window: int, T: int) -> None:
