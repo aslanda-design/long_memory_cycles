@@ -35,10 +35,17 @@ def find_periodogram_peak(
 
     With exclude_zero=True, frequency 0 is skipped so the mean does not dominate.
     """
+        
+    # To ensure that only periods with at least two observed cycles are considered,
+    # the periodogram is analyzed only up to half of the total length of the series.
+    half = len(periodogram) // 2
+    halved_peridogram = periodogram[0:half]
+
     _validate_periodogram(periodogram, min_length=2 if exclude_zero else 1)
     if exclude_zero:
-        return int(np.argmax(periodogram[1:])) + 1
-    return int(np.argmax(periodogram))
+        return int(np.argmax(halved_peridogram[1:])) + 1
+
+    return int(np.argmax(halved_peridogram))
 
 
 def find_top_periodogram_peaks(
@@ -48,7 +55,11 @@ def find_top_periodogram_peaks(
 ) -> np.ndarray:
     """Return the strongest periodogram peaks, largest first."""
     _validate_find_top_peaks(periodogram, n_peaks, exclude_zero)
-    candidates = periodogram[1:] if exclude_zero else periodogram
+
+    half = len(periodogram) // 2
+    halved_peridogram = periodogram[0:half]
+
+    candidates = halved_peridogram[1:] if exclude_zero else periodogram
     offset = 1 if exclude_zero else 0
     top_local = np.argsort(candidates)[-n_peaks:][::-1]
     return top_local + offset
@@ -160,6 +171,50 @@ def compute_frequency_variance_dynamic(
             I_residuals, cycles[0].R, drop_frequency
         )
     return compute_frequency_variance_multi_cycle(I_residuals, cycles, drop_frequency)
+
+
+def compute_xa_single_cycle(
+    psi: np.ndarray,
+    residual_periodogram: np.ndarray,
+) -> float:
+    """Compute XA(R,D) = -(2π/T) * Σ_j ψ(λ_j, R) * I_residuals(λ_j).  T = len(psi)."""
+    _validate_compute_xa_single_cycle(psi, residual_periodogram)
+    T = len(psi)
+    return float(-(2.0 * np.pi / T) * np.sum(psi * residual_periodogram))
+
+
+def compute_xa_multi_cycle(
+    psi_multi: np.ndarray,
+    residual_periodogram: np.ndarray,
+) -> float:
+    """Reserved for the multi-cycle XA case.
+
+    Tracks compute_psi_multi_cycle, which is still a placeholder.
+    """
+    raise NotImplementedError(
+        "Multi-cycle XA computation is not implemented yet. "
+        "Use stochastic_cycle_mode='single' for the current release."
+    )
+
+
+def compute_xa_dynamic(
+    psi: np.ndarray,
+    residual_periodogram: np.ndarray,
+    cycles: object = None,
+    mode: str = "single",
+) -> float:
+    """Dispatch to the single- or multi-cycle XA based on mode.
+
+    "multi_peak_single_cycle" uses the single-cycle path; peak selection already happened upstream.
+    """
+    _VALID_MODES = {"single", "multi_peak_single_cycle", "multi_cycle"}
+    if mode not in _VALID_MODES:
+        raise InvalidConfigurationError(
+            f"Unknown mode: {mode!r}. Expected one of {sorted(_VALID_MODES)}."
+        )
+    if mode in ("single", "multi_peak_single_cycle"):
+        return compute_xa_single_cycle(psi, residual_periodogram)
+    return compute_xa_multi_cycle(psi, residual_periodogram)
 
 
 def compute_psi_dynamic(
@@ -351,6 +406,38 @@ def _validate_compute_frequency_variance_dynamic(
     if mode in ("single", "multi_peak_single_cycle") and len(cycles) != 1:
         raise InvalidCycleError(
             f"mode={mode!r} requires exactly 1 cycle, got {len(cycles)}."
+        )
+
+
+def _validate_compute_xa_single_cycle(
+    psi: Any, residual_periodogram: Any
+) -> None:
+    try:
+        psi_arr = np.asarray(psi, dtype=float)
+    except (TypeError, ValueError) as exc:
+        raise InvalidConfigurationError(f"psi must be a numeric array: {exc}") from exc
+    try:
+        i_arr = np.asarray(residual_periodogram, dtype=float)
+    except (TypeError, ValueError) as exc:
+        raise InvalidConfigurationError(
+            f"residual_periodogram must be a numeric array: {exc}"
+        ) from exc
+    if psi_arr.ndim != 1 or psi_arr.size == 0:
+        raise InvalidConfigurationError("psi must be a non-empty 1-D array.")
+    if i_arr.ndim != 1 or i_arr.size == 0:
+        raise InvalidConfigurationError(
+            "residual_periodogram must be a non-empty 1-D array."
+        )
+    if psi_arr.shape != i_arr.shape:
+        raise InvalidConfigurationError(
+            f"psi and residual_periodogram must have the same shape; "
+            f"got {psi_arr.shape} and {i_arr.shape}."
+        )
+    if not np.all(np.isfinite(psi_arr)):
+        raise InvalidConfigurationError("psi contains non-finite values.")
+    if not np.all(np.isfinite(i_arr)):
+        raise InvalidConfigurationError(
+            "residual_periodogram contains non-finite values."
         )
 
 

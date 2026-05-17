@@ -11,5 +11,6 @@ env/
 .pytest_cache/
 .coverage
 htmlcov/
+data/
 *.so
 .DS_Store

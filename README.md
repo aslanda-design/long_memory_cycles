@@ -10,7 +10,7 @@ Given a time series Y(t), t=1,...,T, this package tests for the presence of frac
 - A stochastic fractional cyclic filter `(1 - 2cos(2πR/T)L + L²)^D`.
 - A grid search over (R, D) candidates, returning the top-k combinations whose test statistic is closest to zero.
 
-## Current status: Waves 0–9 complete
+## Current status: Waves 0–15 complete
 
 | Wave | Content | Status |
 |------|---------|--------|
@@ -24,9 +24,22 @@ Given a time series Y(t), t=1,...,T, this package tests for the presence of frac
 | 7 | Apply fractional cyclic filter to series and design matrix, dispatchers | ✅ |
 | 8 | OLS regression on filtered data, residuals, RSS, time-domain variance VAR | ✅ |
 | 9 | Residual periodogram, frequency-domain variance VAR*, dispatchers | ✅ |
-| 10+ | XA, TEST / TEST* statistic, top-k selection, full `run_cyclical_fractional_test` | 🔜 |
+| 10 | XA(R,D) single/multi-cycle and dispatcher | ✅ |
+| 11 | TEST / TEST* statistic, candidate scoring, TopKSelector | ✅ |
+| 12 | `evaluate_candidate` — full metrics for one (R,D) candidate | ✅ |
+| 13 | `run_cyclical_fractional_test` — complete single-cycle API | ✅ |
+| 14 | Diagnostics module: TestDiagnostics, PeriodogramSummary, VarianceComparison | ✅ |
+| 15 | Mathematical documentation: background, mapping, data-flow diagram, implementation notes | ✅ |
+| 16+ | Multi-cycle full support (psi_multi, xa_multi, xaa_multi) | 🔜 |
 
-The entry point `run_cyclical_fractional_test` validates inputs and then raises `NotImplementedError` — the building blocks from Waves 2–9 are tested independently and will be wired together in Wave 10.
+## Documentation
+
+Detailed reference documents live in [`docs/`](docs/):
+
+- [Mathematical background](docs/mathematical_background.md) — full derivation of ψ, XAA, XA, TEST / TEST*, and the fractional filter
+- [Original test mapping](docs/original_test_mapping.md) — table mapping each step of the source document to source files and functions
+- [Data flow diagram](docs/data_flow_diagram.md) — Mermaid flowcharts of the global pipeline and the per-candidate pipeline
+- [Implementation notes](docs/implementation_notes.md) — 12 non-obvious decisions with rationale (index conventions, singularity handling, filter special cases, …)
 
 ## Installation
 
@@ -61,6 +74,12 @@ from cyclical_fractional_test import (
     compute_residual_periodogram,
     compute_time_variance,
     compute_frequency_variance_dynamic,
+    compute_xa_single_cycle,
+    compute_test_statistic,
+    compute_test_star_statistic,
+    TopKSelector,
+    GridCandidateResult,
+    evaluate_candidate,
 )
 import numpy as np
 
@@ -100,6 +119,41 @@ var_time = compute_time_variance(reg.residuals)                     # float
 var_freq = compute_frequency_variance_dynamic(                      # float
     I_resid, cycles, mode="single", drop_frequency=True
 )
+
+# XA, TEST / TEST*, and top-k ranking (Waves 10–11)
+xa = compute_xa_single_cycle(psi, I_resid)                          # float
+test = compute_test_statistic(T, xa, xaa, var_time)                 # float
+test_star = compute_test_star_statistic(T, xa, xaa, var_freq)       # float
+
+selector = TopKSelector(k=3, statistic_mode="standard")
+selector.consider(GridCandidateResult(
+    cycles=cycles, test_value=test, test_star_value=test_star
+))
+best = selector.get_best()                                          # closest |TEST| to 0
+
+# Full pipeline in one call (Wave 13)
+from cyclical_fractional_test import CyclicalTestConfig, run_cyclical_fractional_test
+import numpy as np
+
+result = run_cyclical_fractional_test(
+    y,
+    config=CyclicalTestConfig(
+        n_deterministic_cycles=4,
+        d_grid=np.array([0.0, 0.25, 0.5, 0.75, 1.0]),
+        r_window=5,
+        top_k=3,
+        stochastic_cycle_mode="single",
+    ),
+)
+print(result.best_result.cycles)    # best (R, D)
+print(result.best_result.test_value)
+print(result.top_k_results)         # top-3 candidates
+
+# Diagnostics (Wave 14)
+diag = result.diagnostics
+print(diag.n_candidates_evaluated)          # number of (R,D) pairs tried
+print(diag.r_star)                          # dominant frequency index
+print(diag.periodogram_summary.peak_value)  # periodogram value at R*
 ```
 
 ## Package structure
@@ -113,10 +167,19 @@ src/cyclical_fractional_test/
 ├── exceptions.py     # CyclicalFractionalTestError hierarchy
 ├── validation.py     # defensive input validation layer
 ├── chebyshev.py      # Chebyshev polynomial design matrix      [Wave 2]
-├── spectral.py       # periodogram, ψ, XAA, VAR*, dispatchers  [Waves 3, 5 & 9]
+├── spectral.py       # periodogram, ψ, XAA, VAR*, XA, dispatchers [Waves 3, 5, 9 & 10]
 ├── grid.py           # R/D grids, candidate iterator            [Wave 4]
 ├── filters.py        # mu, coefficients, filter application     [Waves 6 & 7]
-└── regression.py     # OLS regression, residuals, VAR          [Wave 8]
+├── regression.py     # OLS regression, residuals, VAR          [Wave 8]
+├── scoring.py        # TEST / TEST* statistics, TopKSelector    [Wave 11]
+├── evaluation.py     # evaluate_candidate orchestrator          [Wave 12]
+└── diagnostics.py    # TestDiagnostics, PeriodogramSummary, VarianceComparison [Wave 14]
+
+docs/
+├── mathematical_background.md   # full derivation of the statistical test
+├── original_test_mapping.md     # step-by-step mapping to source files
+├── data_flow_diagram.md         # Mermaid pipeline diagrams
+└── implementation_notes.md      # 12 non-obvious implementation decisions
 
 tests/
 ├── test_config.py
@@ -137,5 +200,20 @@ tests/
 ├── test_residual_periodogram.py
 ├── test_frequency_variance.py
 ├── test_frequency_variance_dispatch.py
-└── test_partial_pipeline_waves_7_9.py
+├── test_partial_pipeline_waves_7_9.py
+├── test_xa_single_cycle.py
+├── test_xa_dispatch.py
+├── test_scoring.py
+├── test_top_k_selector.py
+├── test_partial_pipeline_waves_10_11.py
+├── test_evaluate_candidate_single_cycle.py
+├── test_evaluate_candidate_dispatch.py
+├── test_api_single_cycle.py
+├── test_api_top_k.py
+├── test_api_config_overrides.py
+├── test_api_invalid_inputs.py
+├── test_full_single_cycle_pipeline.py
+├── test_diagnostics.py
+├── test_api_diagnostics.py
+└── test_docs_exist.py
 ```

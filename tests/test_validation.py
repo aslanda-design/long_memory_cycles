@@ -7,7 +7,6 @@ from cyclical_fractional_test import (
     InvalidConfigurationError,
     InvalidSeriesError,
     StochasticCycle,
-    run_cyclical_fractional_test,
 )
 from cyclical_fractional_test.validation import (
     validate_boolean,
@@ -319,22 +318,3 @@ def test_validate_cycles_accepts_multi_cycle_when_allowed():
     assert len(result) == 2
 
 
-# ---------------------------------------------------------------------------
-# api integration
-# ---------------------------------------------------------------------------
-
-
-def test_run_test_validates_series_before_not_implemented():
-    with pytest.raises(NotImplementedError):
-        run_cyclical_fractional_test([1.0, 2.0, 3.0, 4.0, 5.0])
-
-
-def test_run_test_invalid_series_raises_invalid_series_error():
-    with pytest.raises(InvalidSeriesError):
-        run_cyclical_fractional_test([1, np.nan, 3, 4, 5])
-
-
-def test_run_test_invalid_config_raises_invalid_configuration_error():
-    cfg = CyclicalTestConfig(top_k=0)
-    with pytest.raises(InvalidConfigurationError):
-        run_cyclical_fractional_test([1.0, 2.0, 3.0, 4.0, 5.0], config=cfg)

@@ -26,11 +26,11 @@ def fit_filtered_regression(
     """Fit y_filtered = X_filtered @ beta + residuals via OLS (np.linalg.lstsq)."""
 
     _validate_fit_filtered_regression(y_filtered, X_filtered)
-    
+
     y_arr = np.asarray(y_filtered, dtype=float)
     X_arr = np.asarray(X_filtered, dtype=float)
     betas, _, rank, _ = np.linalg.lstsq(X_arr, y_arr, rcond=None)
-    fitted_values = X_arr @ betas
+    fitted_values = X_arr.dot(betas)
     residuals = compute_residuals(y_arr, fitted_values)
     rss = compute_residual_sum_squares(residuals)
     cond = float(np.linalg.cond(X_arr))
@@ -50,6 +50,7 @@ def compute_residuals(
 ) -> np.ndarray:
     """Return y_filtered - fitted_values."""
     _validate_compute_residuals(y_filtered, fitted_values)
+
     return np.asarray(y_filtered, dtype=float) - np.asarray(fitted_values, dtype=float)
 
 

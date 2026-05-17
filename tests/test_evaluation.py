@@ -1,0 +1,113 @@
+import numpy as np
+import pytest
+
+from cyclical_fractional_test.config import CyclicalTestConfig
+from cyclical_fractional_test.evaluation import evaluate_candidate
+from cyclical_fractional_test.exceptions import InvalidConfigurationError, InvalidCycleError
+from cyclical_fractional_test.regression import fit_filtered_regression
+from cyclical_fractional_test.results import GridCandidateResult, StochasticCycle
+
+
+def _config(**kwargs):
+    return CyclicalTestConfig(stochastic_cycle_mode="single", **kwargs)
+
+
+def _make_y_X(T=20, p=2, seed=0):
+    rng = np.random.default_rng(seed)
+    return rng.standard_normal(T), rng.standard_normal((T, p))
+
+
+# ---------------------------------------------------------------------------
+# Happy path
+# ---------------------------------------------------------------------------
+
+
+def test_returns_grid_candidate_result():
+    y, X = _make_y_X()
+    result = evaluate_candidate(y, X, (StochasticCycle(R=2, D=0.3),), _config())
+    assert isinstance(result, GridCandidateResult)
+
+
+def test_key_fields_are_finite():
+    y, X = _make_y_X()
+    result = evaluate_candidate(y, X, (StochasticCycle(R=2, D=0.3),), _config())
+    assert np.isfinite(result.test_value)
+    assert np.isfinite(result.test_star_value)
+    assert np.isfinite(result.xa)
+    assert result.xaa > 0.0
+
+
+def test_output_shapes():
+    T, p = 20, 3
+    y, X = _make_y_X(T=T, p=p)
+    result = evaluate_candidate(y, X, (StochasticCycle(R=2, D=0.3),), _config())
+    assert result.betas.shape == (p,)
+    assert result.residuals.shape == (T,)
+
+
+def test_abs_values_consistent_with_signed():
+    y, X = _make_y_X()
+    result = evaluate_candidate(y, X, (StochasticCycle(R=2, D=0.3),), _config())
+    assert np.isclose(result.abs_test_value, abs(result.test_value))
+    assert np.isclose(result.abs_test_star_value, abs(result.test_star_value))
+
+
+def test_D_zero_matches_direct_ols():
+    """D=0 → filter is identity → betas and residuals match plain OLS."""
+    y, X = _make_y_X(T=25, p=2, seed=7)
+    result = evaluate_candidate(y, X, (StochasticCycle(R=2, D=0.0),), _config())
+    direct = fit_filtered_regression(y, X)
+    np.testing.assert_allclose(result.betas, direct.betas, atol=1e-10)
+    np.testing.assert_allclose(result.residuals, direct.residuals, atol=1e-10)
+
+
+def test_different_candidates_give_different_results():
+    y, X = _make_y_X(T=30, p=2, seed=42)
+    r1 = evaluate_candidate(y, X, (StochasticCycle(R=2, D=0.0),), _config())
+    r2 = evaluate_candidate(y, X, (StochasticCycle(R=4, D=0.5),), _config())
+    assert not np.isclose(r1.test_value, r2.test_value)
+
+
+def test_cycles_field_matches_input():
+    y, X = _make_y_X()
+    cycles = (StochasticCycle(R=2, D=0.3),)
+    assert evaluate_candidate(y, X, cycles, _config()).cycles == cycles
+
+
+# ---------------------------------------------------------------------------
+# Mode dispatch guards
+# ---------------------------------------------------------------------------
+
+
+def test_single_mode_rejects_wrong_cycle_count():
+    y, X = _make_y_X()
+    with pytest.raises((InvalidCycleError, InvalidConfigurationError, ValueError)):
+        evaluate_candidate(y, X, [], _config())
+    with pytest.raises((InvalidCycleError, InvalidConfigurationError, ValueError)):
+        evaluate_candidate(
+            y, X, [StochasticCycle(R=1, D=0.3), StochasticCycle(R=2, D=0.2)], _config()
+        )
+
+
+def test_multi_cycle_mode_not_implemented():
+    y, X = _make_y_X()
+    config = CyclicalTestConfig(stochastic_cycle_mode="multi_cycle")
+    with pytest.raises(NotImplementedError):
+        evaluate_candidate(
+            y, X, [StochasticCycle(R=1, D=0.3), StochasticCycle(R=2, D=0.2)], config
+        )
+
+
+# ---------------------------------------------------------------------------
+# Shape validation
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("bad_y, bad_X", [
+    (np.ones((20, 1)), np.ones((20, 2))),
+    (np.ones(20), np.ones(20)),
+    (np.ones(20), np.ones((15, 2))),
+])
+def test_rejects_invalid_shapes(bad_y, bad_X):
+    with pytest.raises((InvalidConfigurationError, ValueError)):
+        evaluate_candidate(bad_y, bad_X, [StochasticCycle(R=2, D=0.3)], _config())

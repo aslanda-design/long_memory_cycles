@@ -1,4 +1,14 @@
-from .api import run_cyclical_fractional_test
+from .api import compute_periodogram, run_cyclical_fractional_test
+from .diagnostics import (
+    PeriodogramSummary,
+    TestDiagnostics,
+    VarianceComparison,
+    build_candidate_diagnostics,
+    build_test_diagnostics,
+    compare_variance_definitions,
+    summarize_periodogram,
+)
+from .evaluation import evaluate_candidate
 from .chebyshev import (
     build_chebyshev_design,
     build_single_chebyshev_polynomial,
@@ -40,6 +50,12 @@ from .regression import (
     compute_time_variance,
     fit_filtered_regression,
 )
+from .scoring import (
+    TopKSelector,
+    compute_test_star_statistic,
+    compute_test_statistic,
+    score_candidate,
+)
 from .spectral import (
     compute_document_periodogram,
     compute_frequency_variance_dynamic,
@@ -49,6 +65,9 @@ from .spectral import (
     compute_psi_multi_cycle,
     compute_psi_single_cycle,
     compute_residual_periodogram,
+    compute_xa_dynamic,
+    compute_xa_multi_cycle,
+    compute_xa_single_cycle,
     compute_xaa_dynamic,
     compute_xaa_multi_cycle,
     compute_xaa_single_cycle,
@@ -58,7 +77,18 @@ from .spectral import (
 
 __all__ = [
     # api
+    "compute_periodogram",
     "run_cyclical_fractional_test",
+    # evaluation — Wave 12
+    "evaluate_candidate",
+    # diagnostics — Wave 14
+    "PeriodogramSummary",
+    "VarianceComparison",
+    "TestDiagnostics",
+    "summarize_periodogram",
+    "compare_variance_definitions",
+    "build_candidate_diagnostics",
+    "build_test_diagnostics",
     # config
     "CyclicalTestConfig",
     # results
@@ -112,4 +142,13 @@ __all__ = [
     "compute_frequency_variance_single_cycle",
     "compute_frequency_variance_multi_cycle",
     "compute_frequency_variance_dynamic",
+    # spectral — Wave 10
+    "compute_xa_single_cycle",
+    "compute_xa_multi_cycle",
+    "compute_xa_dynamic",
+    # scoring — Wave 11
+    "compute_test_statistic",
+    "compute_test_star_statistic",
+    "score_candidate",
+    "TopKSelector",
 ]
