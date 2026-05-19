@@ -17,30 +17,30 @@ from cyclical_fractional_test.grid import (
 
 
 def test_build_r_grid_around_peak_standard_case():
-    result = build_r_grid_around_peak(r_star=25, r_window=10, T=100)
+    result = build_r_grid_around_peak(r_peak=25, r_window=10, T=100)
     expected = np.arange(15, 36)
     np.testing.assert_array_equal(result, expected)
 
 
 def test_build_r_grid_around_peak_clips_lower_bound():
-    result = build_r_grid_around_peak(r_star=5, r_window=10, T=100)
+    result = build_r_grid_around_peak(r_peak=5, r_window=10, T=100)
     expected = np.arange(1, 16)
     np.testing.assert_array_equal(result, expected)
 
 
 def test_build_r_grid_around_peak_clips_upper_bound():
-    result = build_r_grid_around_peak(r_star=95, r_window=10, T=100)
+    result = build_r_grid_around_peak(r_peak=95, r_window=10, T=100)
     expected = np.arange(85, 100)
     np.testing.assert_array_equal(result, expected)
 
 
 def test_build_r_grid_zero_window_returns_single_element():
-    result = build_r_grid_around_peak(r_star=25, r_window=0, T=100)
+    result = build_r_grid_around_peak(r_peak=25, r_window=0, T=100)
     np.testing.assert_array_equal(result, np.array([25]))
 
 
 def test_build_r_grid_clips_both_bounds():
-    result = build_r_grid_around_peak(r_star=1, r_window=5, T=4)
+    result = build_r_grid_around_peak(r_peak=1, r_window=5, T=4)
     # r_min = max(1, -4) = 1; r_max = min(3, 6) = 3
     np.testing.assert_array_equal(result, np.array([1, 2, 3]))
 
@@ -172,34 +172,34 @@ def test_candidate_iterator_rejects_invalid_mode():
 # ---------------------------------------------------------------------------
 
 
-def test_build_r_grid_rejects_r_star_zero():
+def test_build_r_grid_rejects_r_peak_zero():
     with pytest.raises(InvalidConfigurationError):
-        build_r_grid_around_peak(r_star=0, r_window=5, T=100)
+        build_r_grid_around_peak(r_peak=0, r_window=5, T=100)
 
 
-def test_build_r_grid_rejects_r_star_equals_T():
+def test_build_r_grid_rejects_r_peak_equals_T():
     with pytest.raises(InvalidConfigurationError):
-        build_r_grid_around_peak(r_star=100, r_window=0, T=100)
+        build_r_grid_around_peak(r_peak=100, r_window=0, T=100)
 
 
-def test_build_r_grid_rejects_r_star_float():
+def test_build_r_grid_rejects_r_peak_float():
     with pytest.raises(InvalidConfigurationError):
-        build_r_grid_around_peak(r_star=25.5, r_window=5, T=100)  # type: ignore
+        build_r_grid_around_peak(r_peak=25.5, r_window=5, T=100)  # type: ignore
 
 
 def test_build_r_grid_rejects_negative_r_window():
     with pytest.raises(InvalidConfigurationError):
-        build_r_grid_around_peak(r_star=25, r_window=-1, T=100)
+        build_r_grid_around_peak(r_peak=25, r_window=-1, T=100)
 
 
 def test_build_r_grid_rejects_T_less_than_2():
     with pytest.raises(InvalidConfigurationError):
-        build_r_grid_around_peak(r_star=1, r_window=0, T=1)
+        build_r_grid_around_peak(r_peak=1, r_window=0, T=1)
 
 
 def test_build_r_grid_rejects_float_T():
     with pytest.raises(InvalidConfigurationError):
-        build_r_grid_around_peak(r_star=25, r_window=5, T=100.0)  # type: ignore
+        build_r_grid_around_peak(r_peak=25, r_window=5, T=100.0)  # type: ignore
 
 
 # ---------------------------------------------------------------------------

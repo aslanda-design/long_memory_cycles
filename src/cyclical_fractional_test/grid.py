@@ -9,11 +9,11 @@ from .results import StochasticCycle
 from .validation import validate_d_grid
 
 
-def build_r_grid_around_peak(r_star: int, r_window: int, T: int) -> np.ndarray:
+def build_r_grid_around_peak(r_peak: int, r_window: int, T: int) -> np.ndarray:
     """Build the candidate R grid around R*: [max(1, R*−w), ..., min(T−1, R*+w)]."""
-    _validate_r_grid(r_star, r_window, T)
-    r_min = max(1, r_star - r_window)
-    r_max = min(T - 1, r_star + r_window)
+    _validate_r_grid(r_peak, r_window, T)
+    r_min = max(1, r_peak - r_window)
+    r_max = min(T - 1, r_peak + r_window)
     return np.arange(r_min, r_max + 1)
 
 
@@ -81,10 +81,10 @@ def candidate_iterator(
 # ---------------------------------------------------------------------------
 
 
-def _validate_r_grid(r_star: int, r_window: int, T: int) -> None:
-    if isinstance(r_star, bool) or not isinstance(r_star, int):
+def _validate_r_grid(r_peak: int, r_window: int, T: int) -> None:
+    if isinstance(r_peak, bool) or not isinstance(r_peak, int):
         raise InvalidConfigurationError(
-            f"r_star must be an int, got {type(r_star).__name__}."
+            f"r_peak must be an int, got {type(r_peak).__name__}."
         )
     if isinstance(r_window, bool) or not isinstance(r_window, int):
         raise InvalidConfigurationError(
@@ -96,7 +96,7 @@ def _validate_r_grid(r_star: int, r_window: int, T: int) -> None:
         raise InvalidConfigurationError(f"T must be >= 2, got {T}.")
     if r_window < 0:
         raise InvalidConfigurationError(f"r_window must be >= 0, got {r_window}.")
-    if r_star < 1 or r_star > T - 1:
+    if r_peak < 1 or r_peak > T - 1:
         raise InvalidConfigurationError(
-            f"r_star must satisfy 1 <= r_star <= T-1={T - 1}, got r_star={r_star}."
+            f"r_peak must satisfy 1 <= r_peak <= T-1={T - 1}, got r_peak={r_peak}."
         )

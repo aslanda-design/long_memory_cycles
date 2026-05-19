@@ -271,9 +271,9 @@ def test_diagnostics_counters_consistent():
     assert diag.n_failed_candidates == 0
 
 
-def test_diagnostics_r_star_and_candidates_match_result():
+def test_diagnostics_r_peak_and_candidates_match_result():
     result = run_cyclical_fractional_test(_series(), config=_small_config())
-    assert result.diagnostics.r_star == result.r_star
+    assert result.diagnostics.r_peak == result.r_peak
     assert result.diagnostics.r_candidates_count == len(result.r_candidates)
 
 
@@ -281,7 +281,7 @@ def test_diagnostics_periodogram_summary_consistent():
     result = run_cyclical_fractional_test(_series(), config=_small_config())
     ps = result.diagnostics.periodogram_summary
     assert isinstance(ps, PeriodogramSummary)
-    assert ps.peak_index == result.r_star
+    assert ps.peak_index == result.r_peak
 
 
 def test_diagnostics_does_not_affect_ordering():

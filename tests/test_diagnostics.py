@@ -205,7 +205,7 @@ def test_build_test_diagnostics_basic_counters():
         warnings=[],
         lambdas_y=None,
         periodogram_y=None,
-        r_star=3,
+        r_peak=3,
         r_candidates=np.array([2, 3, 4]),
         d_grid=np.array([0.0, 0.5]),
         config=CyclicalTestConfig(stochastic_cycle_mode="single"),
@@ -214,7 +214,7 @@ def test_build_test_diagnostics_basic_counters():
     assert result.n_candidates_evaluated == 10
     assert result.n_valid_candidates == 10
     assert result.n_failed_candidates == 0
-    assert result.r_star == 3
+    assert result.r_peak == 3
     assert result.r_candidates_count == 3
     assert result.d_grid_count == 2
 
@@ -227,7 +227,7 @@ def test_build_test_diagnostics_no_periodogram_returns_none_summary():
         warnings=[],
         lambdas_y=None,
         periodogram_y=None,
-        r_star=2,
+        r_peak=2,
         r_candidates=np.array([1, 2]),
         d_grid=np.array([0.0]),
         config=CyclicalTestConfig(),
@@ -246,7 +246,7 @@ def test_build_test_diagnostics_with_periodogram():
         warnings=[],
         lambdas_y=lam,
         periodogram_y=per,
-        r_star=2,
+        r_peak=2,
         r_candidates=np.array([1, 2, 3]),
         d_grid=np.array([0.0, 0.5]),
         config=CyclicalTestConfig(),
@@ -263,7 +263,7 @@ def test_build_test_diagnostics_warnings_copied():
         warnings=["w1", "w2"],
         lambdas_y=None,
         periodogram_y=None,
-        r_star=None,
+        r_peak=None,
         r_candidates=np.array([]),
         d_grid=np.array([]),
         config=CyclicalTestConfig(),
@@ -280,7 +280,7 @@ def test_build_test_diagnostics_statistic_mode_from_config():
         warnings=[],
         lambdas_y=None,
         periodogram_y=None,
-        r_star=1,
+        r_peak=1,
         r_candidates=np.array([1]),
         d_grid=np.array([0.0]),
         config=config,

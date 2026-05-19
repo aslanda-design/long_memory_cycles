@@ -46,8 +46,8 @@ class CyclicalFractionalTestResult:
 
     best_result: Optional[GridCandidateResult] = None  # Best candidate found.
     top_k_results: List[GridCandidateResult] = field(default_factory=list)  # Retained top-k candidates.
-    r_star: Optional[int] = None  # Main periodogram peak used to build the R grid.
-    r_candidates: Optional[np.ndarray] = None  # R values considered around r_star.
+    r_peak: Optional[int] = None  # Main periodogram peak used to build the R grid.
+    r_candidates: Optional[np.ndarray] = None  # R values considered around r_peak.
     d_grid: Optional[np.ndarray] = None  # D values evaluated in the grid.
     config: Optional[CyclicalTestConfig] = None  # Configuration used in the run.
     n_candidates_evaluated: Optional[int] = None  # Total grid points evaluated.

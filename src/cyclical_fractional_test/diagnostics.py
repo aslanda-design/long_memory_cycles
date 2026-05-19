@@ -44,7 +44,7 @@ class TestDiagnostics:
     periodogram_summary: Optional[PeriodogramSummary]  # Input periodogram info.
     selected_statistic_mode: str  # config.statistic_mode used for ranking.
     stochastic_cycle_mode: str  # config.stochastic_cycle_mode used.
-    r_star: Optional[int]  # Main periodogram peak index.
+    r_peak: Optional[int]  # Main periodogram peak index.
     r_candidates_count: int  # Number of R values in the search grid.
     d_grid_count: int  # Number of D values in the search grid.
 
@@ -158,7 +158,7 @@ def build_test_diagnostics(
     warnings: List[str],
     lambdas_y: Optional[np.ndarray],
     periodogram_y: Optional[np.ndarray],
-    r_star: Optional[int],
+    r_peak: Optional[int],
     r_candidates: Any,
     d_grid: Any,
     config: Any,
@@ -170,7 +170,7 @@ def build_test_diagnostics(
             periodogram_summary = summarize_periodogram(
                 lambdas_y,
                 periodogram_y,
-                peak_index=r_star,
+                peak_index=r_peak,
                 exclude_zero=getattr(config, "exclude_zero_frequency", True),
             )
         except Exception:
@@ -187,7 +187,7 @@ def build_test_diagnostics(
         periodogram_summary=periodogram_summary,
         selected_statistic_mode=getattr(config, "statistic_mode", "unknown"),
         stochastic_cycle_mode=getattr(config, "stochastic_cycle_mode", "unknown"),
-        r_star=r_star,
+        r_peak=r_peak,
         r_candidates_count=r_count,
         d_grid_count=d_count,
     )

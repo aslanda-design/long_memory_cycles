@@ -60,9 +60,11 @@ def run_cyclical_fractional_test(
     X = build_chebyshev_design(T, config.n_deterministic_cycles, config.include_intercept)
 
     lambdas_y, I_y = compute_document_periodogram(arr)
-    r_star = find_periodogram_peak(I_y, exclude_zero=config.exclude_zero_frequency)
+    r_peak = find_periodogram_peak(I_y, exclude_zero=config.exclude_zero_frequency)
 
-    r_candidates = build_r_grid_around_peak(r_star, config.r_window, T)
+    r_candidates = build_r_grid_around_peak(r_peak, config.r_window, T)
+
+    #Here, we could optimize the grid by choosing the d values given by the normal function
     d_grid = build_d_grid(config.d_grid)
 
     selector = TopKSelector(k=config.top_k, statistic_mode=config.statistic_mode)
@@ -86,6 +88,8 @@ def run_cyclical_fractional_test(
     top_k_results = selector.get_top_k()
     best_result = selector.get_best()
 
+    #The second order auto-regresive model would go here
+
     diagnostics = build_test_diagnostics(
         n_candidates_evaluated=n_evaluated,
         n_valid_candidates=n_valid,
@@ -93,7 +97,7 @@ def run_cyclical_fractional_test(
         warnings=warnings,
         lambdas_y=lambdas_y,
         periodogram_y=I_y,
-        r_star=r_star,
+        r_peak=r_peak,
         r_candidates=r_candidates,
         d_grid=d_grid,
         config=config,
@@ -102,7 +106,7 @@ def run_cyclical_fractional_test(
     return CyclicalFractionalTestResult(
         best_result=best_result,
         top_k_results=top_k_results,
-        r_star=r_star,
+        r_peak=r_peak,
         r_candidates=r_candidates,
         d_grid=d_grid,
         config=config,
