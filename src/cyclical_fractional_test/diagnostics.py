@@ -44,9 +44,17 @@ class TestDiagnostics:
     periodogram_summary: Optional[PeriodogramSummary]  # Input periodogram info.
     selected_statistic_mode: str  # config.statistic_mode used for ranking.
     stochastic_cycle_mode: str  # config.stochastic_cycle_mode used.
+    error_model: str  # config.error_model used for residual errors.
     r_peak: Optional[int]  # Main periodogram peak index.
     r_candidates_count: int  # Number of R values in the search grid.
-    d_grid_count: int  # Number of D values in the search grid.
+    d_grid_count: int  # Number of D values in the (coarse or fixed) search grid.
+    d_search_strategy: str = "adaptive"  # "adaptive" or "fixed_grid".
+    d_fine_step: Optional[float] = None  # Fine-grid step (adaptive search only).
+    d_fine_radius: Optional[float] = None  # Fine-grid half-width (adaptive search only).
+    best_coarse_d_per_r: Optional[List[float]] = None  # Best coarse D for each R (adaptive).
+    final_d_per_r: Optional[List[float]] = None  # Final refined D for each R (adaptive).
+    n_coarse_evaluations: Optional[int] = None  # Coarse (R,D) candidates evaluated (adaptive).
+    n_fine_evaluations: Optional[int] = None  # Fine (R,D) candidates evaluated (adaptive).
 
 
 def summarize_periodogram(
@@ -147,6 +155,8 @@ def build_candidate_diagnostics(candidate_result: Any) -> dict:
         ),
         "number_of_betas": len(betas) if betas is not None else None,
         "residual_length": len(residuals) if residuals is not None else None,
+        "error_model": getattr(candidate_result, "error_model", "white_noise"),
+        "ar_coefficients": getattr(candidate_result, "ar_coefficients", ()),
     }
 
 
@@ -162,8 +172,13 @@ def build_test_diagnostics(
     r_candidates: Any,
     d_grid: Any,
     config: Any,
+    adaptive_info: Optional[dict] = None,
 ) -> TestDiagnostics:
-    """Assemble the run-level TestDiagnostics from collected counters and arrays."""
+    """Assemble the run-level TestDiagnostics from collected counters and arrays.
+
+    adaptive_info, when present, carries the per-R coarse/fine search summary; it
+    is purely descriptive and never feeds back into the statistical computation.
+    """
     periodogram_summary = None
     if lambdas_y is not None and periodogram_y is not None:
         try:
@@ -178,6 +193,7 @@ def build_test_diagnostics(
 
     r_count = len(r_candidates) if r_candidates is not None else 0
     d_count = len(d_grid) if d_grid is not None else 0
+    info = adaptive_info or {}
 
     return TestDiagnostics(
         n_candidates_evaluated=n_candidates_evaluated,
@@ -187,9 +203,17 @@ def build_test_diagnostics(
         periodogram_summary=periodogram_summary,
         selected_statistic_mode=getattr(config, "statistic_mode", "unknown"),
         stochastic_cycle_mode=getattr(config, "stochastic_cycle_mode", "unknown"),
+        error_model=getattr(config, "error_model", "unknown"),
         r_peak=r_peak,
         r_candidates_count=r_count,
         d_grid_count=d_count,
+        d_search_strategy=getattr(config, "d_search_strategy", "adaptive"),
+        d_fine_step=info.get("d_fine_step"),
+        d_fine_radius=info.get("d_fine_radius"),
+        best_coarse_d_per_r=info.get("best_coarse_d_per_r"),
+        final_d_per_r=info.get("final_d_per_r"),
+        n_coarse_evaluations=info.get("n_coarse_evaluations"),
+        n_fine_evaluations=info.get("n_fine_evaluations"),
     )
 
 

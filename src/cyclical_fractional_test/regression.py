@@ -69,6 +69,21 @@ def compute_time_variance(residuals: np.ndarray) -> float:
     return float(np.mean(np.asarray(residuals, dtype=float) ** 2))
 
 
+def estimate_ar_ols(residuals: np.ndarray, order: int) -> np.ndarray:
+    """Estimate AR nuisance coefficients from residuals with OLS."""
+    _validate_estimate_ar_ols(residuals, order)
+    residuals_arr = np.asarray(residuals, dtype=float)
+    if order == 0:
+        return np.array([], dtype=float)
+
+    target = residuals_arr[order:]
+    lagged = np.column_stack(
+        [residuals_arr[order - lag : -lag] for lag in range(1, order + 1)]
+    )
+    coefficients, _, _, _ = np.linalg.lstsq(lagged, target, rcond=None)
+    return coefficients
+
+
 # ---------------------------------------------------------------------------
 # Validators
 # In this section we define the input validation for each of the functions of
@@ -122,3 +137,23 @@ def _validate_1d_array(arr: object, name: str) -> None:
         raise InvalidConfigurationError(f"{name} must be numeric: {exc}") from exc
     if arr_np.ndim != 1 or arr_np.size == 0:
         raise InvalidConfigurationError(f"{name} must be a non-empty 1-D array.")
+
+
+def _validate_estimate_ar_ols(residuals: object, order: int) -> None:
+    _validate_1d_array(residuals, "residuals")
+    residuals_arr = np.asarray(residuals, dtype=float)
+    if not np.all(np.isfinite(residuals_arr)):
+        raise InvalidConfigurationError("residuals contains non-finite values.")
+    if isinstance(order, bool) or not isinstance(order, int):
+        raise InvalidConfigurationError(
+            f"order must be an int, got {type(order).__name__}."
+        )
+    if order not in (0, 1, 2):
+        raise InvalidConfigurationError(
+            f"order must be one of [0, 1, 2], got {order}."
+        )
+    if len(residuals_arr) <= order:
+        raise InvalidConfigurationError(
+            f"AR({order}) estimation requires more than {order} residuals, "
+            f"got {len(residuals_arr)}."
+        )

@@ -13,15 +13,18 @@ This table maps each step of the original statistical test to the concrete files
 | 4 | Build R candidate grid | R ∈ [R*−w, R*+w] ∩ [1, T−1] | `grid.py` | `build_r_grid_around_peak` | ✅ Implemented |
 | 5a | Compute ψ(λ_j, R) | ψ = log\|2(cosλ_j − cosλ_R)\| | `spectral.py` | `compute_psi_single_cycle`, `compute_psi_dynamic` | ✅ Implemented |
 | 5b | Compute XAA(R) | XAA = (2/T) Σ ψ² | `spectral.py` | `compute_xaa_single_cycle`, `compute_xaa_dynamic` | ✅ Implemented |
-| 6 | Build D candidate grid | D ∈ [0, 1] | `grid.py` | `build_d_grid` | ✅ Implemented |
-| 6b | Iterate candidates | Cartesian product (R, D) | `grid.py`, `api.py` | `build_single_cycle_candidate_grid`, `candidate_iterator` | ✅ Implemented |
+| 5c | Adjust XAA for residual AR errors | XAA_AR1 or XAA_AR2 projection correction | `spectral.py` | `compute_xaa_error_model`, `compute_xaa_ar1_dynamic`, `compute_xaa_ar1_single_cycle`, `compute_xaa_ar2_dynamic`, `compute_xaa_ar2_single_cycle` | ✅ Single-cycle implemented; multi-cycle placeholders |
+| 6 | Build D candidate grid | D ∈ [0, 1] | `grid.py` | `build_d_grid`, `build_default_d_coarse_grid`, `build_d_fine_grid`, `build_d_grid_for_strategy` | ✅ Implemented |
+| 6b | Iterate candidates | Cartesian (R, D), or per-R adaptive coarse→fine D | `grid.py`, `evaluation.py`, `api.py` | `build_single_cycle_candidate_grid`, `candidate_iterator`, `evaluate_r_with_adaptive_d` | ✅ Implemented |
 | 7 | Apply fractional cyclic filter | (1−2μL+L²)^D applied to Y and X | `filters.py` | `compute_mu`, `compute_fractional_coefficients_single_cycle`, `apply_fractional_filter_single_series`, `apply_single_cycle_filter`, `filter_response_and_design` | ✅ Implemented |
 | 8 | Fit filtered regression | Y_D = X_D β + ε via OLS | `regression.py` | `fit_filtered_regression` | ✅ Implemented |
 | 9 | Extract betas and residuals | β̂, ε̂ = Y_D − X_D β̂ | `regression.py` | `RegressionResult`, `compute_residuals`, `compute_residual_sum_squares` | ✅ Implemented |
 | 10 | Residual periodogram | I_resid(λ_j) = \|FFT(ε̂)_j\|²/(2πT) | `spectral.py` | `compute_residual_periodogram` | ✅ Implemented |
+| 10b | Estimate AR nuisance coefficients | ε̂_t = Σ_k φ_k ε̂_{t−k} + e_t | `regression.py` | `estimate_ar_ols` | ✅ Implemented |
+| 10c | Build AR spectral adjustment | g(λ_j; φ̂) = \|1 − Σ_k φ̂_k exp(i k λ_j)\|^(−2) | `spectral.py` | `compute_ar_spectral_adjustment` | ✅ Implemented |
 | 11a | Time-domain variance VAR | VAR = (1/T) Σ ε̂(t)² | `regression.py` | `compute_time_variance` | ✅ Implemented |
 | 11b | Frequency-domain variance VAR* | VAR* = (2π/T) Σ I_resid(λ_j) | `spectral.py` | `compute_frequency_variance_single_cycle`, `compute_frequency_variance_dynamic` | ✅ Implemented |
-| 12 | Compute XA(R,D) | XA = −(2π/T) Σ ψ · I_resid | `spectral.py` | `compute_xa_single_cycle`, `compute_xa_dynamic` | ✅ Implemented |
+| 12 | Compute XA(R,D) | XA = −(2π/T) Σ ψ · I_resid, divided by g for AR errors | `spectral.py` | `compute_xa_single_cycle`, `compute_xa_ar_adjusted`, `compute_xa_error_model`, `compute_xa_ar1_dynamic`, `compute_xa_ar1_single_cycle`, `compute_xa_ar2_dynamic`, `compute_xa_ar2_single_cycle`, `compute_xa_dynamic` | ✅ Single-cycle implemented; multi-cycle placeholders |
 | 13a | Compute TEST | TEST = √T / √XAA · XA / VAR | `scoring.py` | `compute_test_statistic` | ✅ Implemented |
 | 13b | Compute TEST* | TEST* = √T / √XAA · XA / VAR* | `scoring.py` | `compute_test_star_statistic` | ✅ Implemented |
 | PS | Select closest to zero | min \|TEST\| or \|TEST*\| over (R,D) | `scoring.py`, `evaluation.py`, `api.py` | `score_candidate`, `TopKSelector`, `evaluate_candidate`, `run_cyclical_fractional_test` | ✅ Implemented |
@@ -61,9 +64,18 @@ r_peak = find_periodogram_peak(I_y, exclude_zero=True)
 ```python
 # grid.py
 r_candidates = build_r_grid_around_peak(r_peak, r_window, T)
-d_grid        = build_d_grid(config.d_grid)   # default [0.0, 0.1, ..., 1.0]
-candidates    = build_single_cycle_candidate_grid(r_candidates, d_grid)
+
+# Fixed-grid strategy (config.d_search_strategy == "fixed_grid"):
+d_grid     = build_d_grid(config.d_grid)        # default [0.0, 0.1, ..., 1.0]
+candidates = build_single_cycle_candidate_grid(r_candidates, d_grid)
+
+# Adaptive strategy (default): coarse grid + local refinement, per R
+# evaluation.py
+search = evaluate_r_with_adaptive_d(y, X, R, config)   # AdaptiveDSearchResult
+best_for_R = search.best_result
 ```
+
+The adaptive search seeds from the coarse grid (`build_d_grid_for_strategy` → `build_default_d_coarse_grid` or `config.d_coarse_grid`), then refines with `build_d_fine_grid(best_coarse_D, config.d_fine_radius, config.d_fine_step)`. It only affects **which** (R, D) candidates are evaluated; each candidate is still scored by the same `evaluate_candidate` machinery (Points 5–13).
 
 ### Point 5 — ψ and XAA
 
@@ -71,6 +83,14 @@ candidates    = build_single_cycle_candidate_grid(r_candidates, d_grid)
 # spectral.py
 psi = compute_psi_single_cycle(T, R)        # shape (T,), singular positions zeroed
 xaa = compute_xaa_single_cycle(psi)         # float
+```
+
+For AR(1) and AR(2) residual errors, final XAA is computed after nuisance-parameter estimation:
+
+```python
+xaa = compute_xaa_error_model(
+    psi, lambdas_r, error_model, ar_coefficients, stochastic_cycle_mode
+)
 ```
 
 ### Point 7 — Fractional filter
@@ -97,6 +117,16 @@ reg = fit_filtered_regression(y_f, X_f)
 lambdas_r, I_resid = compute_residual_periodogram(reg.residuals)
 ```
 
+For AR-adjusted runs, estimate nuisance parameters and build the spectral weighting:
+
+```python
+# regression.py
+ar_coefficients = estimate_ar_ols(reg.residuals, order)
+
+# spectral.py
+g = compute_ar_spectral_adjustment(lambdas_r, ar_coefficients)
+```
+
 ### Point 11 — VAR and VAR*
 
 ```python
@@ -111,8 +141,12 @@ var_f = compute_frequency_variance_dynamic(I_resid, cycles, mode="single", drop_
 
 ```python
 # spectral.py
-xa = compute_xa_single_cycle(psi, I_resid)
+xa = compute_xa_error_model(
+    psi, I_resid, error_model, g, stochastic_cycle_mode
+)
 ```
+
+With `error_model="white_noise"`, `g` is an array of ones and the dispatcher delegates to `compute_xa_single_cycle`. AR coefficients are nuisance parameters, not the primary output of the long-memory test.
 
 ### Point 13 — TEST and TEST*
 

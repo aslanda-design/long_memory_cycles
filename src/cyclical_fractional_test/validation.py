@@ -9,6 +9,8 @@ from .exceptions import InvalidConfigurationError, InvalidCycleError, InvalidSer
 _VARIANCE_MODES = {"time", "frequency", "both"}
 _STATISTIC_MODES = {"test", "test_star"}
 _STOCHASTIC_CYCLE_MODES = {"single", "multi_peak_single_cycle", "multi_cycle"}
+_ERROR_MODELS = {"white_noise", "ar1", "ar2"}
+_D_SEARCH_STRATEGIES = {"adaptive", "fixed_grid"}
 
 _MIN_SERIES_LENGTH = 5
 
@@ -117,6 +119,74 @@ def validate_d_grid(d_grid: Any) -> Optional[np.ndarray]:
         )
 
     return arr
+
+
+def validate_d_coarse_grid(d_coarse_grid: Any) -> Optional[np.ndarray]:
+    """Check the adaptive coarse grid for D.
+
+    None is left untouched so the default coarse grid is built at runtime.
+    User grids must be one-dimensional numeric values in [0, 1].
+    """
+    if d_coarse_grid is None:
+        return None
+
+    try:
+        arr = np.asarray(d_coarse_grid, dtype=float)
+    except (TypeError, ValueError) as exc:
+        raise InvalidConfigurationError(
+            f"d_coarse_grid cannot be converted to a numeric array: {exc}"
+        ) from exc
+
+    if arr.ndim != 1:
+        raise InvalidConfigurationError(
+            f"d_coarse_grid must be 1-dimensional, got shape {arr.shape}."
+        )
+    if arr.size == 0:
+        raise InvalidConfigurationError("d_coarse_grid must not be empty.")
+    if np.any(np.isnan(arr)):
+        raise InvalidConfigurationError("d_coarse_grid contains NaN values.")
+    if np.any(np.isinf(arr)):
+        raise InvalidConfigurationError("d_coarse_grid contains infinite values.")
+    if np.any(arr < 0.0) or np.any(arr > 1.0):
+        raise InvalidConfigurationError(
+            "All d_coarse_grid values must lie in [0.0, 1.0]."
+        )
+
+    return arr
+
+
+def validate_d_fine_step(d_fine_step: Any) -> float:
+    """Check the fine-grid step used in adaptive search; must be positive and finite."""
+    if isinstance(d_fine_step, bool):
+        raise InvalidConfigurationError("d_fine_step must be numeric, got bool.")
+    try:
+        value = float(d_fine_step)
+    except (TypeError, ValueError) as exc:
+        raise InvalidConfigurationError(
+            f"d_fine_step must be numeric, got {type(d_fine_step).__name__}."
+        ) from exc
+    if not np.isfinite(value):
+        raise InvalidConfigurationError(f"d_fine_step must be finite, got {d_fine_step!r}.")
+    if value <= 0.0:
+        raise InvalidConfigurationError(f"d_fine_step must be > 0, got {value}.")
+    return value
+
+
+def validate_d_fine_radius(d_fine_radius: Any) -> float:
+    """Check the fine-grid half-width used in adaptive search; must be positive and finite."""
+    if isinstance(d_fine_radius, bool):
+        raise InvalidConfigurationError("d_fine_radius must be numeric, got bool.")
+    try:
+        value = float(d_fine_radius)
+    except (TypeError, ValueError) as exc:
+        raise InvalidConfigurationError(
+            f"d_fine_radius must be numeric, got {type(d_fine_radius).__name__}."
+        ) from exc
+    if not np.isfinite(value):
+        raise InvalidConfigurationError(f"d_fine_radius must be finite, got {d_fine_radius!r}.")
+    if value <= 0.0:
+        raise InvalidConfigurationError(f"d_fine_radius must be > 0, got {value}.")
+    return value
 
 
 def validate_mode(value: Any, allowed_values: Collection[str], field_name: str) -> str:
@@ -233,6 +303,10 @@ def validate_config(config: Any) -> "CyclicalTestConfig":
     validate_n_deterministic_cycles(config.n_deterministic_cycles)
     validate_boolean(config.include_intercept, "include_intercept")
     validate_d_grid(config.d_grid)
+    validate_mode(config.d_search_strategy, _D_SEARCH_STRATEGIES, "d_search_strategy")
+    validate_d_coarse_grid(config.d_coarse_grid)
+    validate_d_fine_step(config.d_fine_step)
+    validate_d_fine_radius(config.d_fine_radius)
     validate_r_window(config.r_window)
     validate_top_k(config.top_k)
     validate_mode(config.variance_mode, _VARIANCE_MODES, "variance_mode")
@@ -240,6 +314,7 @@ def validate_config(config: Any) -> "CyclicalTestConfig":
     validate_mode(
         config.stochastic_cycle_mode, _STOCHASTIC_CYCLE_MODES, "stochastic_cycle_mode"
     )
+    validate_mode(config.error_model, _ERROR_MODELS, "error_model")
     validate_boolean(config.drop_singular_frequency, "drop_singular_frequency")
     validate_boolean(config.exclude_zero_frequency, "exclude_zero_frequency")
     validate_boolean(config.return_residuals_for_top_k, "return_residuals_for_top_k")

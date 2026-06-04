@@ -6,16 +6,21 @@ import numpy as np
 
 from .exceptions import InvalidConfigurationError, InvalidCycleError
 from .filters import filter_response_and_design
-from .regression import compute_time_variance, fit_filtered_regression
-from .results import GridCandidateResult, StochasticCycle
-from .scoring import compute_test_star_statistic, compute_test_statistic
+from .grid import build_d_fine_grid, build_d_grid_for_strategy
+from .regression import compute_time_variance, estimate_ar_ols, fit_filtered_regression
+from .results import AdaptiveDSearchResult, GridCandidateResult, StochasticCycle
+from .scoring import compute_test_star_statistic, compute_test_statistic, score_candidate
 from .spectral import (
     compute_frequency_variance_dynamic,
+    compute_ar_spectral_adjustment,
     compute_psi_dynamic,
     compute_residual_periodogram,
-    compute_xa_dynamic,
-    compute_xaa_dynamic,
+    compute_xa_error_model,
+    compute_xaa_error_model,
 )
+from .validation import validate_config
+
+_ERROR_MODEL_ORDERS = {"white_noise": 0, "ar1": 1, "ar2": 2}
 
 
 def evaluate_candidate(
@@ -26,7 +31,7 @@ def evaluate_candidate(
 ) -> GridCandidateResult:
     """Evaluate one grid candidate and return its full set of statistics.
 
-    Orchestrates Waves 5–11 for a single (cycles, config) combination.
+    Orchestrates Waves 5–11 and 16 for a single (cycles, config) combination.
     Does not build grids, select R*, perform scoring, or rank results.
     """
     _validate_evaluate_candidate(y, X, cycles, config)
@@ -36,23 +41,35 @@ def evaluate_candidate(
     T = len(y)
 
     psi = compute_psi_dynamic(T, cycles_t, mode, config.drop_singular_frequency)
-    xaa = compute_xaa_dynamic(psi, mode)
 
     y_f, X_f = filter_response_and_design(y, X, cycles_t, mode=mode)
     reg = fit_filtered_regression(y_f, X_f)
 
-    _, I_resid = compute_residual_periodogram(reg.residuals)
+    lambdas_resid, I_resid = compute_residual_periodogram(reg.residuals)
     variance_time = compute_time_variance(reg.residuals)
+    ar_coefficients = estimate_ar_ols(
+        reg.residuals, _ERROR_MODEL_ORDERS[config.error_model]
+    )
+    ar_spectral_adjustment = compute_ar_spectral_adjustment(
+        lambdas_resid, ar_coefficients
+    )
+    xaa = compute_xaa_error_model(
+        psi, lambdas_resid, config.error_model, ar_coefficients, mode
+    )
+    xa = compute_xa_error_model(
+        psi, I_resid, config.error_model, ar_spectral_adjustment, mode
+    )
     variance_frequency = compute_frequency_variance_dynamic(
         I_resid, cycles_t, mode=mode, drop_frequency=config.drop_singular_frequency
     )
 
-    xa = compute_xa_dynamic(psi, I_resid, cycles=cycles_t, mode=mode)
     test_value = compute_test_statistic(T, xa, xaa, variance_time)
     test_star_value = compute_test_star_statistic(T, xa, xaa, variance_frequency)
 
     return GridCandidateResult(
         cycles=cycles_t,
+        error_model=config.error_model,
+        ar_coefficients=tuple(float(value) for value in ar_coefficients),
         test_value=test_value,
         test_star_value=test_star_value,
         abs_test_value=abs(test_value),
@@ -67,6 +84,64 @@ def evaluate_candidate(
     )
 
 
+def evaluate_r_with_adaptive_d(
+    y: np.ndarray,
+    X: np.ndarray,
+    R: int,
+    config: object,
+) -> AdaptiveDSearchResult:
+    """Run the coarse-to-fine D search for one frequency index R.
+
+    Evaluates the coarse grid, refines locally around the best coarse D, and
+    returns the best candidate found. The fine grid reuses the coarse result
+    for any D already evaluated, so each (R,D) pair is computed at most once.
+    """
+    _validate_evaluate_r_with_adaptive_d(y, X, R, config)
+
+    mode = config.statistic_mode
+    coarse_grid = build_d_grid_for_strategy(config)  # adaptive → coarse grid
+
+    # Evaluate the coarse stage; keep one result per distinct D value.
+    results_by_d: dict[float, GridCandidateResult] = {}
+    for d in coarse_grid:
+        key = round(float(d), 12)
+        if key in results_by_d:
+            continue
+        results_by_d[key] = evaluate_candidate(
+            y, X, (StochasticCycle(R=int(R), D=key),), config
+        )
+    n_coarse = len(results_by_d)
+
+    best_coarse_d = min(results_by_d, key=lambda k: score_candidate(results_by_d[k], mode))
+    best_coarse_result = results_by_d[best_coarse_d]
+
+    # Refine locally; only evaluate D values not already seen in the coarse stage.
+    fine_grid = build_d_fine_grid(best_coarse_d, config.d_fine_radius, config.d_fine_step)
+    n_fine = 0
+    for d in fine_grid:
+        key = round(float(d), 12)
+        if key in results_by_d:
+            continue
+        results_by_d[key] = evaluate_candidate(
+            y, X, (StochasticCycle(R=int(R), D=key),), config
+        )
+        n_fine += 1
+
+    best_d = min(results_by_d, key=lambda k: score_candidate(results_by_d[k], mode))
+    best_result = results_by_d[best_d]
+
+    return AdaptiveDSearchResult(
+        R=int(R),
+        best_result=best_result,
+        best_coarse_result=best_coarse_result,
+        best_coarse_d=float(best_coarse_d),
+        best_d=float(best_d),
+        n_coarse_evaluated=n_coarse,
+        n_fine_evaluated=n_fine,
+        n_candidates_evaluated=len(results_by_d),
+    )
+
+
 # ---------------------------------------------------------------------------
 # Validators
 # In this section we define the input validation for each of the functions of
@@ -78,6 +153,7 @@ def evaluate_candidate(
 def _validate_evaluate_candidate(
     y: object, X: object, cycles: object, config: object
 ) -> None:
+    validate_config(config)
     try:
         y_arr = np.asarray(y, dtype=float)
     except (TypeError, ValueError) as exc:
@@ -113,3 +189,13 @@ def _validate_evaluate_candidate(
             f"stochastic_cycle_mode='single' requires exactly 1 cycle, "
             f"got {len(cycle_list)}."
         )
+
+
+def _validate_evaluate_r_with_adaptive_d(
+    y: object, X: object, R: object, config: object
+) -> None:
+    validate_config(config)
+    if isinstance(R, bool) or not isinstance(R, (int, np.integer)):
+        raise InvalidCycleError(f"R must be an int, got {type(R).__name__}.")
+    if int(R) <= 0:
+        raise InvalidCycleError(f"R must be > 0, got {R}.")

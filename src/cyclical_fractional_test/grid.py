@@ -6,7 +6,10 @@ import numpy as np
 
 from .exceptions import InvalidConfigurationError
 from .results import StochasticCycle
-from .validation import validate_d_grid
+from .validation import validate_d_coarse_grid, validate_d_grid
+
+# D grids are rounded to this many decimals to avoid noise like 0.30000000000000004.
+_D_ROUND_DECIMALS = 12
 
 
 def build_r_grid_around_peak(r_peak: int, r_window: int, T: int) -> np.ndarray:
@@ -26,6 +29,44 @@ def build_d_grid(d_grid: Any = None) -> np.ndarray:
     if d_grid is None:
         return np.linspace(0.0, 1.0, 11)
     return validate_d_grid(d_grid)
+
+
+def build_default_d_coarse_grid() -> np.ndarray:
+    """Return the default coarse D grid [0.0, 0.1, ..., 1.0] with stable rounding."""
+    return np.round(np.linspace(0.0, 1.0, 11), _D_ROUND_DECIMALS)
+
+
+def build_d_fine_grid(
+    center: float,
+    radius: float,
+    step: float,
+    lower: float = 0.0,
+    upper: float = 1.0,
+) -> np.ndarray:
+    """Build the local fine D grid around center, clipped to [lower, upper].
+
+    For center=0.3, radius=0.09, step=0.01 this returns [0.21, ..., 0.39].
+    Values out of range are clipped and de-duplicated, so boundary centers
+    (0.0 or 1.0) yield a one-sided grid.
+    """
+    _validate_build_d_fine_grid(center, radius, step, lower, upper)
+    raw = np.arange(center - radius, center + radius + step / 2.0, step)
+    raw = np.round(raw, _D_ROUND_DECIMALS)
+    clipped = np.round(np.clip(raw, lower, upper), _D_ROUND_DECIMALS)
+    return np.unique(clipped)
+
+
+def build_d_grid_for_strategy(config: Any) -> np.ndarray:
+    """Return the D grid that seeds the search for the configured strategy.
+
+    For "fixed_grid" this is the full evaluation grid (config.d_grid or default).
+    For "adaptive" this is the coarse grid; local refinement happens per R later.
+    """
+    if config.d_search_strategy == "fixed_grid":
+        return build_d_grid(config.d_grid)
+    if config.d_coarse_grid is None:
+        return build_default_d_coarse_grid()
+    return np.round(validate_d_coarse_grid(config.d_coarse_grid), _D_ROUND_DECIMALS)
 
 
 def build_single_cycle_candidate_grid(
@@ -79,6 +120,36 @@ def candidate_iterator(
 # this script, this way we ensure that in case of error, we know  the exact 
 # reason why the process failed.
 # ---------------------------------------------------------------------------
+
+
+def _validate_build_d_fine_grid(
+    center: float, radius: float, step: float, lower: float, upper: float
+) -> None:
+    for value, name in [
+        (center, "center"),
+        (radius, "radius"),
+        (step, "step"),
+        (lower, "lower"),
+        (upper, "upper"),
+    ]:
+        if isinstance(value, bool):
+            raise InvalidConfigurationError(f"{name} must be numeric, got bool.")
+        try:
+            v = float(value)
+        except (TypeError, ValueError) as exc:
+            raise InvalidConfigurationError(
+                f"{name} must be numeric, got {type(value).__name__}."
+            ) from exc
+        if not np.isfinite(v):
+            raise InvalidConfigurationError(f"{name} must be finite, got {value!r}.")
+    if float(step) <= 0.0:
+        raise InvalidConfigurationError(f"step must be > 0, got {step}.")
+    if float(radius) <= 0.0:
+        raise InvalidConfigurationError(f"radius must be > 0, got {radius}.")
+    if float(lower) > float(upper):
+        raise InvalidConfigurationError(
+            f"lower must be <= upper, got lower={lower}, upper={upper}."
+        )
 
 
 def _validate_r_grid(r_peak: int, r_window: int, T: int) -> None:

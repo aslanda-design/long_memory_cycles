@@ -8,7 +8,7 @@ from .diagnostics import (
     compare_variance_definitions,
     summarize_periodogram,
 )
-from .evaluation import evaluate_candidate
+from .evaluation import evaluate_candidate, evaluate_r_with_adaptive_d
 from .chebyshev import (
     build_chebyshev_design,
     build_single_chebyshev_polynomial,
@@ -21,13 +21,17 @@ from .exceptions import (
     InvalidSeriesError,
 )
 from .grid import (
+    build_d_fine_grid,
     build_d_grid,
+    build_d_grid_for_strategy,
+    build_default_d_coarse_grid,
     build_multi_cycle_candidate_grid,
     build_r_grid_around_peak,
     build_single_cycle_candidate_grid,
     candidate_iterator,
 )
 from .results import (
+    AdaptiveDSearchResult,
     CyclicalFractionalTestResult,
     GridCandidateResult,
     StochasticCycle,
@@ -48,6 +52,7 @@ from .regression import (
     compute_residual_sum_squares,
     compute_residuals,
     compute_time_variance,
+    estimate_ar_ols,
     fit_filtered_regression,
 )
 from .scoring import (
@@ -57,6 +62,7 @@ from .scoring import (
     score_candidate,
 )
 from .spectral import (
+    compute_ar_spectral_adjustment,
     compute_document_periodogram,
     compute_frequency_variance_dynamic,
     compute_frequency_variance_multi_cycle,
@@ -65,10 +71,25 @@ from .spectral import (
     compute_psi_multi_cycle,
     compute_psi_single_cycle,
     compute_residual_periodogram,
+    compute_xa_ar_adjusted,
+    compute_xa_ar1_dynamic,
+    compute_xa_ar1_multi_cycle,
+    compute_xa_ar1_single_cycle,
+    compute_xa_ar2_dynamic,
+    compute_xa_ar2_multi_cycle,
+    compute_xa_ar2_single_cycle,
     compute_xa_dynamic,
+    compute_xa_error_model,
     compute_xa_multi_cycle,
     compute_xa_single_cycle,
     compute_xaa_dynamic,
+    compute_xaa_ar1_dynamic,
+    compute_xaa_ar1_multi_cycle,
+    compute_xaa_ar1_single_cycle,
+    compute_xaa_ar2_dynamic,
+    compute_xaa_ar2_multi_cycle,
+    compute_xaa_ar2_single_cycle,
+    compute_xaa_error_model,
     compute_xaa_multi_cycle,
     compute_xaa_single_cycle,
     find_periodogram_peak,
@@ -81,6 +102,9 @@ __all__ = [
     "run_cyclical_fractional_test",
     # evaluation — Wave 12
     "evaluate_candidate",
+    # evaluation — adaptive D search
+    "evaluate_r_with_adaptive_d",
+    "AdaptiveDSearchResult",
     # diagnostics — Wave 14
     "PeriodogramSummary",
     "VarianceComparison",
@@ -114,9 +138,19 @@ __all__ = [
     "compute_xaa_multi_cycle",
     "compute_psi_dynamic",
     "compute_xaa_dynamic",
+    "compute_xaa_error_model",
+    "compute_xaa_ar1_single_cycle",
+    "compute_xaa_ar1_multi_cycle",
+    "compute_xaa_ar1_dynamic",
+    "compute_xaa_ar2_single_cycle",
+    "compute_xaa_ar2_multi_cycle",
+    "compute_xaa_ar2_dynamic",
     # grid
     "build_r_grid_around_peak",
     "build_d_grid",
+    "build_default_d_coarse_grid",
+    "build_d_fine_grid",
+    "build_d_grid_for_strategy",
     "build_single_cycle_candidate_grid",
     "build_multi_cycle_candidate_grid",
     "candidate_iterator",
@@ -137,7 +171,9 @@ __all__ = [
     "compute_residuals",
     "compute_residual_sum_squares",
     "compute_time_variance",
+    "estimate_ar_ols",
     # spectral — Wave 9
+    "compute_ar_spectral_adjustment",
     "compute_residual_periodogram",
     "compute_frequency_variance_single_cycle",
     "compute_frequency_variance_multi_cycle",
@@ -146,6 +182,14 @@ __all__ = [
     "compute_xa_single_cycle",
     "compute_xa_multi_cycle",
     "compute_xa_dynamic",
+    "compute_xa_ar_adjusted",
+    "compute_xa_error_model",
+    "compute_xa_ar1_single_cycle",
+    "compute_xa_ar1_multi_cycle",
+    "compute_xa_ar1_dynamic",
+    "compute_xa_ar2_single_cycle",
+    "compute_xa_ar2_multi_cycle",
+    "compute_xa_ar2_dynamic",
     # scoring — Wave 11
     "compute_test_statistic",
     "compute_test_star_statistic",

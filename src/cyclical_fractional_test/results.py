@@ -27,6 +27,8 @@ class GridCandidateResult:
     """
 
     cycles: Tuple[StochasticCycle, ...]  # Cycle tuple represented by this grid point.
+    error_model: str = "white_noise"  # Residual error specification used for this candidate.
+    ar_coefficients: Tuple[float, ...] = field(default_factory=tuple)  # Estimated AR nuisance parameters.
     test_value: Optional[float] = None  # TEST statistic for the candidate.
     test_star_value: Optional[float] = None  # TEST* statistic for the candidate.
     abs_test_value: Optional[float] = None  # Absolute value used for TEST ranking.
@@ -38,6 +40,20 @@ class GridCandidateResult:
     betas: Optional[np.ndarray] = None  # Estimated deterministic-cycle coefficients.
     residuals: Optional[np.ndarray] = None  # Regression residuals for this candidate.
     residual_sum_squares: Optional[float] = None  # Sum of squared residuals.
+
+
+@dataclass
+class AdaptiveDSearchResult:
+    """Outcome of the adaptive coarse-to-fine D search for a single frequency R."""
+
+    R: int  # Frequency index the search was run for.
+    best_result: GridCandidateResult  # Best candidate over coarse and fine stages.
+    best_coarse_result: GridCandidateResult  # Best candidate from the coarse stage.
+    best_coarse_d: float  # D selected by the coarse stage.
+    best_d: float  # Final D after local refinement.
+    n_coarse_evaluated: int  # Distinct coarse D values evaluated.
+    n_fine_evaluated: int  # Distinct fine D values evaluated (excludes reused ones).
+    n_candidates_evaluated: int  # Total distinct (R,D) candidates evaluated for this R.
 
 
 @dataclass

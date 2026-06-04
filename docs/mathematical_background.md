@@ -10,6 +10,7 @@ The procedure tests whether a time series Y(t) exhibits fractional cyclic long m
 
 - A **deterministic component** — Chebyshev polynomials that capture smooth trends.
 - A **stochastic fractional cyclic component** — the filter `(1 − 2cos(2πR/T)L + L²)^D`, where R is the cyclic frequency index and D is the fractional integration parameter.
+- A configurable **residual error specification** — white noise, AR(1), or AR(2).
 - A **grid search** over candidate pairs (R, D).
 - A **spectral statistic** TEST (or TEST*) that measures how close XA is to zero after normalisation.
 
@@ -89,7 +90,7 @@ This is the score function of the cyclic fractional spectral model.
 
 ---
 
-## 7. XAA
+## 7. White-noise XAA
 
 The asymptotic variance of the score:
 
@@ -97,7 +98,7 @@ The asymptotic variance of the score:
 XAA(R) = (2 / T) Σ_{j=0}^{T−1} ψ(λ_j, R)²
 ```
 
-XAA is always positive for valid (non-degenerate) R.
+This is the XAA formula for `error_model="white_noise"`. XAA is always positive for valid (non-degenerate) R. AR-adjusted definitions are given in Section 12a.
 
 ---
 
@@ -171,6 +172,93 @@ The periodogram of the regression residuals uses the identical formula as Sectio
 I_resid(λ_j) = |FFT(ε̂)_j|² / (2π T)
 ```
 
+## 12a. Residual error specifications
+
+The residual error model is selected with `CyclicalTestConfig.error_model`.
+
+### White noise
+
+With `error_model="white_noise"`, the original XAA and XA formulas are used unchanged. No nuisance coefficients are estimated.
+
+### AR(1)
+
+For `error_model="ar1"`, the filtered-regression residuals are used to estimate:
+
+```
+ε̂_t = φ ε̂_{t−1} + e_t
+```
+
+by OLS. The spectral adjustment is:
+
+```
+g(λ_j; φ̂) = |1 − φ̂ exp(i λ_j)|^(−2)
+           = (1 + φ̂² − 2 φ̂ cos(λ_j))^(−1)
+```
+
+Define:
+
+```
+epsilon(λ_j; φ̂) = 2 (cos(λ_j) − φ̂) g(λ_j; φ̂)
+```
+
+Then:
+
+```
+XAA_AR1 = (2/T) [
+    Σ_j ψ(λ_j)²
+    − (Σ_j ψ(λ_j) epsilon(λ_j; φ̂))² / Σ_j epsilon(λ_j; φ̂)²
+]
+
+XA_AR1 = −(2π/T) Σ_j ψ(λ_j) I_resid(λ_j) / g(λ_j; φ̂)
+```
+
+### AR(2)
+
+For `error_model="ar2"`, OLS estimates:
+
+```
+ε̂_t = φ_1 ε̂_{t−1} + φ_2 ε̂_{t−2} + e_t
+```
+
+The spectral adjustment is:
+
+```
+g(λ_j; φ̂) =
+|1 − φ̂_1 exp(i λ_j) − φ̂_2 exp(2 i λ_j)|^(−2)
+```
+
+Define:
+
+```
+epsilon_1(λ_j; φ̂) =
+    2 (cos(λ_j) − φ̂_1 − φ̂_2 cos(λ_j)) g(λ_j; φ̂)
+
+epsilon_2(λ_j; φ̂) =
+    2 (cos(2λ_j) − φ̂_1 cos(λ_j) − φ̂_2) g(λ_j; φ̂)
+```
+
+Let `epsilon(λ_j; φ̂) = [epsilon_1(λ_j; φ̂), epsilon_2(λ_j; φ̂)]`. Then:
+
+```
+S_psi_epsilon = Σ_j epsilon(λ_j; φ̂) ψ(λ_j)
+S_epsilon_epsilon = Σ_j epsilon(λ_j; φ̂) epsilon(λ_j; φ̂).T
+
+XAA_AR2 = (2/T) [
+    Σ_j ψ(λ_j)²
+    − S_psi_epsilon.T inv(S_epsilon_epsilon) S_psi_epsilon
+]
+
+XA_AR2 = −(2π/T) Σ_j ψ(λ_j) I_resid(λ_j) / g(λ_j; φ̂)
+```
+
+The estimated AR coefficients are nuisance parameters used to adjust the score statistic. They are exposed in each `GridCandidateResult` for diagnostics, but they are not the target of the long-memory test.
+
+The AR(1)/AR(2) specification is independent of the number of stochastic
+cycles. The code therefore exposes separate single-cycle implementations and
+multi-cycle placeholders for adjusted XAA and XA. Multi-cycle AR formulas are
+not evaluated yet because the general multi-cycle ψ, XAA, and XA definitions
+remain pending.
+
 ---
 
 ## 13. Variance estimators
@@ -193,7 +281,7 @@ When `drop_singular_frequency=True`, the term at j = R is excluded from the sum.
 
 ---
 
-## 14. XA
+## 14. White-noise XA
 
 The cross-product between the score function and the residual periodogram:
 
@@ -201,7 +289,7 @@ The cross-product between the score function and the residual periodogram:
 XA(R, D) = − (2π / T) Σ_{j=0}^{T−1} ψ(λ_j, R) I_resid(λ_j)
 ```
 
-XA is the numerator of the score test statistic. It equals zero when the model is correctly specified at (R, D).
+This is the XA formula for `error_model="white_noise"`. AR-adjusted XA formulas are given in Section 12a. XA is the numerator of the score test statistic. It equals zero when the model is correctly specified at (R, D).
 
 ---
 
@@ -222,6 +310,32 @@ Both statistics are signed. The absolute value is used only when ranking candida
 ## 16. Selection criterion
 
 The best estimate of (R, D) is the combination that makes |TEST| (or |TEST*|) closest to zero, i.e., the value where XA ≈ 0 and the model is most consistent with the data.
+
+---
+
+## 16b. Search strategy for D (adaptive coarse-to-fine)
+
+This section concerns **how candidate D values are chosen**, not the test itself. The statistic in Sections 1–16 is unchanged: ψ, XAA, XA, VAR, VAR*, TEST, and TEST* are computed exactly as above for whichever (R, D) the search decides to evaluate.
+
+For a fixed frequency index R, the test statistic is asymptotically normal in D. The objective `|TEST(R, ·)|` is therefore locally smooth enough that its minimiser can be located by a two-stage search instead of a dense grid over the whole interval `[0, 1]`:
+
+1. **Coarse stage.** Evaluate D on a coarse grid, by default `{0.0, 0.1, …, 1.0}`. Select the coarse minimiser
+
+   ```
+   D_coarse* = argmin_D |TEST(R, D)|        (or |TEST*(R, D)|)
+   ```
+
+2. **Fine stage.** Evaluate a local grid around `D_coarse*` with step `h` and radius `ρ` (defaults `h = 0.01`, `ρ = 0.09`), clipped to `[0, 1]`:
+
+   ```
+   { clip(D_coarse* + k·h, 0, 1) : k = -⌊ρ/h⌋, …, ⌊ρ/h⌋ }
+   ```
+
+   For `D_coarse* = 0.3` this is `{0.21, 0.22, …, 0.39}`. At a boundary (`0.0` or `1.0`) the window is one-sided after clipping.
+
+3. **Selection.** The chosen D for this R is the minimiser of `|TEST|` (or `|TEST*|`) over the union of the coarse and fine evaluations.
+
+The same scoring rule used for ranking (`abs(TEST)` for `statistic_mode="test"`, `abs(TEST*)` for `"test_star"`) drives both stages. The strategy reduces the number of D evaluations from a dense grid to roughly `(#coarse) + (2ρ/h + 1)` per R while still resolving D to the fine step `h`. Setting `d_search_strategy="fixed_grid"` evaluates the full Cartesian `(R, D)` grid instead.
 
 ---
 
