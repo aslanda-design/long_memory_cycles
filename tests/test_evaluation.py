@@ -74,6 +74,26 @@ def test_cycles_field_matches_input():
     assert evaluate_candidate(y, X, cycles, _config()).cycles == cycles
 
 
+def test_white_noise_metadata_is_default():
+    y, X = _make_y_X()
+    result = evaluate_candidate(y, X, (StochasticCycle(R=2, D=0.3),), _config())
+    assert result.error_model == "white_noise"
+    assert result.ar_coefficients == ()
+
+
+@pytest.mark.parametrize("error_model, coefficient_count", [("ar1", 1), ("ar2", 2)])
+def test_ar_error_model_exposes_estimated_coefficients(error_model, coefficient_count):
+    y, X = _make_y_X(T=30)
+    result = evaluate_candidate(
+        y,
+        X,
+        (StochasticCycle(R=2, D=0.3),),
+        _config(error_model=error_model),
+    )
+    assert result.error_model == error_model
+    assert len(result.ar_coefficients) == coefficient_count
+
+
 # ---------------------------------------------------------------------------
 # Mode dispatch guards
 # ---------------------------------------------------------------------------

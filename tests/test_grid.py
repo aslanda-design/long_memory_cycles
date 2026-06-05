@@ -2,8 +2,12 @@ import numpy as np
 import pytest
 
 from cyclical_fractional_test import InvalidConfigurationError, StochasticCycle
+from cyclical_fractional_test import CyclicalTestConfig
 from cyclical_fractional_test.grid import (
+    build_d_fine_grid,
     build_d_grid,
+    build_d_grid_for_strategy,
+    build_default_d_coarse_grid,
     build_multi_cycle_candidate_grid,
     build_r_grid_around_peak,
     build_single_cycle_candidate_grid,
@@ -76,6 +80,62 @@ def test_build_d_grid_custom_numpy_input():
 def test_build_d_grid_returns_ndarray():
     assert isinstance(build_d_grid(), np.ndarray)
     assert isinstance(build_d_grid([0.1, 0.5]), np.ndarray)
+
+
+# ---------------------------------------------------------------------------
+# build_default_d_coarse_grid / build_d_fine_grid (adaptive search)
+# ---------------------------------------------------------------------------
+
+
+def test_default_coarse_grid_is_exact():
+    result = build_default_d_coarse_grid()
+    np.testing.assert_allclose(result, np.array([0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0]))
+
+
+def test_fine_grid_centered_at_03():
+    result = build_d_fine_grid(0.3, radius=0.09, step=0.01)
+    expected = np.array([round(0.21 + 0.01 * i, 12) for i in range(19)])
+    assert len(result) == 19
+    np.testing.assert_allclose(result, expected)
+    assert result[0] == pytest.approx(0.21)
+    assert result[-1] == pytest.approx(0.39)
+
+
+def test_fine_grid_clipped_at_lower_boundary():
+    result = build_d_fine_grid(0.0, radius=0.09, step=0.01)
+    expected = np.array([round(0.01 * i, 12) for i in range(10)])
+    np.testing.assert_allclose(result, expected)
+    assert result[0] == pytest.approx(0.0)
+    assert result[-1] == pytest.approx(0.09)
+
+
+def test_fine_grid_clipped_at_upper_boundary():
+    result = build_d_fine_grid(1.0, radius=0.09, step=0.01)
+    expected = np.array([round(0.91 + 0.01 * i, 12) for i in range(10)])
+    np.testing.assert_allclose(result, expected)
+    assert result[0] == pytest.approx(0.91)
+    assert result[-1] == pytest.approx(1.0)
+
+
+def test_fine_grid_values_stay_in_unit_interval():
+    result = build_d_fine_grid(0.95, radius=0.09, step=0.01)
+    assert np.all(result >= 0.0)
+    assert np.all(result <= 1.0)
+
+
+def test_build_d_grid_for_strategy_adaptive_returns_coarse():
+    cfg = CyclicalTestConfig(d_search_strategy="adaptive")
+    np.testing.assert_allclose(build_d_grid_for_strategy(cfg), build_default_d_coarse_grid())
+
+
+def test_build_d_grid_for_strategy_fixed_uses_d_grid():
+    cfg = CyclicalTestConfig(d_search_strategy="fixed_grid", d_grid=np.array([0.0, 0.5, 1.0]))
+    np.testing.assert_allclose(build_d_grid_for_strategy(cfg), np.array([0.0, 0.5, 1.0]))
+
+
+def test_build_d_grid_for_strategy_adaptive_custom_coarse():
+    cfg = CyclicalTestConfig(d_search_strategy="adaptive", d_coarse_grid=np.array([0.0, 0.25, 0.5, 0.75, 1.0]))
+    np.testing.assert_allclose(build_d_grid_for_strategy(cfg), np.array([0.0, 0.25, 0.5, 0.75, 1.0]))
 
 
 # ---------------------------------------------------------------------------

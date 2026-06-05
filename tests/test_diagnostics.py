@@ -192,6 +192,14 @@ def test_build_candidate_diagnostics_variance_comparison_present():
     assert isinstance(result["variance_comparison"], VarianceComparison)
 
 
+def test_build_candidate_diagnostics_includes_error_model_metadata():
+    result = build_candidate_diagnostics(
+        _make_candidate(error_model="ar1", ar_coefficients=(0.4,))
+    )
+    assert result["error_model"] == "ar1"
+    assert result["ar_coefficients"] == (0.4,)
+
+
 # ---------------------------------------------------------------------------
 # build_test_diagnostics
 # ---------------------------------------------------------------------------
@@ -286,3 +294,19 @@ def test_build_test_diagnostics_statistic_mode_from_config():
         config=config,
     )
     assert result.selected_statistic_mode == "test_star"
+
+
+def test_build_test_diagnostics_error_model_from_config():
+    result = build_test_diagnostics(
+        n_candidates_evaluated=1,
+        n_valid_candidates=1,
+        n_failed_candidates=0,
+        warnings=[],
+        lambdas_y=None,
+        periodogram_y=None,
+        r_peak=1,
+        r_candidates=np.array([1]),
+        d_grid=np.array([0.0]),
+        config=CyclicalTestConfig(error_model="ar2"),
+    )
+    assert result.error_model == "ar2"

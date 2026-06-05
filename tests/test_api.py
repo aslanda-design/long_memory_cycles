@@ -40,6 +40,7 @@ def test_config_default_values():
     assert cfg.n_deterministic_cycles == 4
     assert cfg.top_k == 1
     assert cfg.stochastic_cycle_mode == "single"
+    assert cfg.error_model == "white_noise"
     assert cfg.d_grid is None
     assert cfg.drop_singular_frequency is True
 
@@ -71,6 +72,19 @@ def _small_config(**overrides):
 
 def _series(T=50, seed=0):
     return np.random.default_rng(seed).standard_normal(T)
+
+
+def _fixed_config(**overrides):
+    defaults = dict(
+        n_deterministic_cycles=2,
+        d_search_strategy="fixed_grid",
+        d_grid=np.array([0.0, 0.5, 1.0]),
+        r_window=1,
+        top_k=1,
+        stochastic_cycle_mode="single",
+    )
+    defaults.update(overrides)
+    return CyclicalTestConfig(**defaults)
 
 
 # ---------------------------------------------------------------------------
@@ -163,6 +177,33 @@ def test_kwargs_work_without_config():
     assert result.best_result is not None
 
 
+def test_explicit_white_noise_matches_default_behavior():
+    y = _series(T=60, seed=11)
+    config = _small_config()
+    default_result = run_cyclical_fractional_test(y, config=config)
+    explicit_result = run_cyclical_fractional_test(
+        y, config=config, error_model="white_noise"
+    )
+    assert explicit_result.r_peak == default_result.r_peak
+    assert explicit_result.best_result.cycles == default_result.best_result.cycles
+    assert explicit_result.best_result.ar_coefficients == ()
+    assert explicit_result.best_result.xa == default_result.best_result.xa
+    assert explicit_result.best_result.xaa == default_result.best_result.xaa
+    assert explicit_result.best_result.test_value == default_result.best_result.test_value
+
+
+@pytest.mark.parametrize("error_model, coefficient_count", [("ar1", 1), ("ar2", 2)])
+def test_full_pipeline_supports_ar_error_models(error_model, coefficient_count):
+    result = run_cyclical_fractional_test(
+        _series(T=60, seed=123),
+        config=_small_config(d_grid=np.array([0.0]), r_window=0, top_k=1),
+        error_model=error_model,
+    )
+    assert result.best_result.error_model == error_model
+    assert len(result.best_result.ar_coefficients) == coefficient_count
+    assert np.isfinite(result.best_result.test_value)
+
+
 def test_default_config_runs():
     result = run_cyclical_fractional_test(_series(T=60))
     assert result.best_result is not None
@@ -210,6 +251,14 @@ def test_rejects_non_finite_d_grid():
         )
 
 
+def test_rejects_invalid_error_model():
+    with pytest.raises(InvalidConfigurationError):
+        run_cyclical_fractional_test(
+            _series(T=30),
+            config=_small_config(error_model="ar3"),
+        )
+
+
 # ---------------------------------------------------------------------------
 # Top-k ordering and counting
 # ---------------------------------------------------------------------------
@@ -229,6 +278,7 @@ def test_n_candidates_evaluated_matches_grid_size():
         _series(),
         config=CyclicalTestConfig(
             n_deterministic_cycles=2,
+            d_search_strategy="fixed_grid",
             d_grid=np.array([0.0, 1.0]),
             r_window=1,
             top_k=1,
@@ -243,6 +293,7 @@ def test_fewer_candidates_than_top_k_returns_all():
         _series(),
         config=CyclicalTestConfig(
             n_deterministic_cycles=2,
+            d_search_strategy="fixed_grid",
             d_grid=np.array([0.0]),
             r_window=0,
             top_k=10,
@@ -251,6 +302,89 @@ def test_fewer_candidates_than_top_k_returns_all():
     )
     assert len(result.top_k_results) == 1
     assert result.n_candidates_evaluated == 1
+
+
+# ---------------------------------------------------------------------------
+# Adaptive D search
+# ---------------------------------------------------------------------------
+
+
+def test_default_run_uses_adaptive_search():
+    result = run_cyclical_fractional_test(_series(T=60), config=_small_config(r_window=1))
+    assert result.config.d_search_strategy == "adaptive"
+    assert result.diagnostics.d_search_strategy == "adaptive"
+    assert result.best_result is not None
+
+
+def test_explicit_adaptive_strategy_runs():
+    result = run_cyclical_fractional_test(
+        _series(T=60), config=_small_config(r_window=1), d_search_strategy="adaptive"
+    )
+    assert result.best_result is not None
+    assert result.diagnostics.n_coarse_evaluations is not None
+    assert result.diagnostics.n_fine_evaluations is not None
+
+
+def test_fixed_grid_strategy_preserves_old_behavior():
+    result = run_cyclical_fractional_test(
+        _series(T=60),
+        config=CyclicalTestConfig(
+            n_deterministic_cycles=2,
+            d_search_strategy="fixed_grid",
+            d_grid=np.array([0.0, 0.5, 1.0]),
+            r_window=1,
+            top_k=1,
+            stochastic_cycle_mode="single",
+        ),
+    )
+    assert result.n_candidates_evaluated == len(result.r_candidates) * 3
+    assert result.diagnostics.d_search_strategy == "fixed_grid"
+
+
+def test_adaptive_n_candidates_counts_coarse_plus_fine_minus_reuse():
+    result = run_cyclical_fractional_test(
+        _series(T=60), config=_small_config(r_window=0, top_k=1)
+    )
+    diag = result.diagnostics
+    # Single R: 11 coarse values. The fine grid overlaps the best coarse value, so
+    # the reused candidate is not recounted. Fine count is 18 for an interior best
+    # coarse D, or 9 when it lands on a [0,1] boundary (one-sided window).
+    assert diag.n_coarse_evaluations == 11
+    assert 9 <= diag.n_fine_evaluations <= 18
+    assert result.n_candidates_evaluated == diag.n_coarse_evaluations + diag.n_fine_evaluations
+
+
+def test_adaptive_best_d_lies_on_coarse_or_fine_grid():
+    result = run_cyclical_fractional_test(
+        _series(T=60, seed=7), config=_small_config(r_window=0, top_k=1)
+    )
+    best_d = result.best_result.cycles[0].D
+    coarse = set(np.round(np.linspace(0.0, 1.0, 11), 12))
+    best_coarse = result.diagnostics.best_coarse_d_per_r[0]
+    fine = set(np.round(np.arange(round(best_coarse - 0.09, 12), best_coarse + 0.09 + 0.005, 0.01), 12))
+    fine = {v for v in fine if 0.0 <= v <= 1.0}
+    assert round(best_d, 12) in (coarse | fine)
+
+
+def test_adaptive_refines_around_best_coarse():
+    result = run_cyclical_fractional_test(
+        _series(T=60, seed=7), config=_small_config(r_window=0, top_k=1)
+    )
+    best_d = result.best_result.cycles[0].D
+    best_coarse = result.diagnostics.best_coarse_d_per_r[0]
+    # Final D must be within the local fine window around the best coarse D.
+    assert abs(best_d - best_coarse) <= 0.09 + 1e-9
+
+
+@pytest.mark.parametrize("error_model", ["white_noise", "ar1", "ar2"])
+def test_adaptive_supports_error_models(error_model):
+    result = run_cyclical_fractional_test(
+        _series(T=60, seed=3),
+        config=_small_config(r_window=0, top_k=1),
+        error_model=error_model,
+    )
+    assert result.best_result.error_model == error_model
+    assert np.isfinite(result.best_result.test_value)
 
 
 # ---------------------------------------------------------------------------
@@ -339,3 +473,70 @@ def test_full_pipeline_with_structured_series():
         assert cand.residuals.shape == (T,)
     scores = [abs(c.test_value) for c in result.top_k_results]
     assert scores == sorted(scores)
+
+
+# ---------------------------------------------------------------------------
+# Under-threshold results
+# ---------------------------------------------------------------------------
+
+
+def test_threshold_none_yields_no_under_threshold_results():
+    result = run_cyclical_fractional_test(_series(), config=_small_config())
+    assert result.under_threshold_results is None
+
+
+def test_threshold_groups_all_candidates_by_r_when_large():
+    config = _fixed_config(d_grid=np.array([0.0, 0.3, 0.7, 1.0]))
+    result = run_cyclical_fractional_test(_series(T=60, seed=1), config=config, threshold=1e9)
+    utr = result.under_threshold_results
+    assert utr is not None
+    # A huge threshold keeps every evaluated candidate; keys are exactly the R grid.
+    assert set(utr.keys()) == {int(r) for r in result.r_candidates}
+    assert sum(len(cands) for cands in utr.values()) == result.n_candidates_evaluated
+    assert all(abs(c.test_value) < 1e9 for cands in utr.values() for c in cands)
+
+
+def test_threshold_keys_and_scores_are_sorted():
+    config = _fixed_config(d_grid=np.array([0.0, 0.3, 0.7, 1.0]))
+    result = run_cyclical_fractional_test(_series(T=60, seed=9), config=config, threshold=1e9)
+    utr = result.under_threshold_results
+    assert list(utr.keys()) == sorted(utr.keys())
+    for cands in utr.values():
+        scores = [abs(c.test_value) for c in cands]
+        assert scores == sorted(scores)
+
+
+def test_threshold_filters_strictly_below():
+    config = _fixed_config(d_grid=np.array([0.0, 0.3, 0.7, 1.0]))
+    y = _series(T=60, seed=5)
+    full = run_cyclical_fractional_test(y, config=config, threshold=1e9).under_threshold_results
+    thr = 0.7
+    small = run_cyclical_fractional_test(y, config=config, threshold=thr).under_threshold_results
+    # Every retained candidate is strictly below the threshold.
+    assert all(abs(c.test_value) < thr for cands in small.values() for c in cands)
+    # Nothing qualifying is dropped: count matches a manual filter of the full set.
+    expected = sum(1 for cands in full.values() for c in cands if abs(c.test_value) < thr)
+    assert sum(len(cands) for cands in small.values()) == expected
+
+
+def test_threshold_adaptive_collects_multiple_d_per_r():
+    result = run_cyclical_fractional_test(
+        _series(T=60, seed=7),
+        config=_small_config(r_window=0, top_k=1),
+        threshold=1e9,
+    )
+    utr = result.under_threshold_results
+    assert utr is not None
+    # Single R (r_window=0); a huge threshold keeps every evaluated D for that R.
+    assert len(utr) == 1
+    (cands,) = utr.values()
+    assert len(cands) == result.n_candidates_evaluated
+    assert len(cands) > 1
+    assert len({c.cycles[0].R for c in cands}) == 1
+    assert len({round(c.cycles[0].D, 12) for c in cands}) == len(cands)
+
+
+@pytest.mark.parametrize("bad_threshold", [0.0, -1.0, float("nan"), float("inf"), True])
+def test_rejects_invalid_threshold(bad_threshold):
+    with pytest.raises(InvalidConfigurationError):
+        run_cyclical_fractional_test(_series(T=30), config=_small_config(), threshold=bad_threshold)

@@ -13,6 +13,9 @@ from cyclical_fractional_test.validation import (
     validate_config,
     validate_cycle,
     validate_cycles,
+    validate_d_coarse_grid,
+    validate_d_fine_radius,
+    validate_d_fine_step,
     validate_d_grid,
     validate_mode,
     validate_n_deterministic_cycles,
@@ -193,6 +196,76 @@ def test_validate_d_grid_rejects_non_numeric():
 
 
 # ---------------------------------------------------------------------------
+# adaptive D search config (d_search_strategy, d_coarse_grid, d_fine_*)
+# ---------------------------------------------------------------------------
+
+
+def test_default_config_uses_adaptive_search():
+    cfg = CyclicalTestConfig()
+    assert cfg.d_search_strategy == "adaptive"
+    assert cfg.d_fine_step == 0.01
+    assert cfg.d_fine_radius == 0.09
+    assert cfg.d_coarse_grid is None
+
+
+def test_validate_config_rejects_invalid_d_search_strategy():
+    with pytest.raises(InvalidConfigurationError):
+        validate_config(CyclicalTestConfig(d_search_strategy="nope"))
+
+
+@pytest.mark.parametrize("bad_step", [0.0, -0.01])
+def test_validate_d_fine_step_rejects_non_positive(bad_step):
+    with pytest.raises(InvalidConfigurationError):
+        validate_d_fine_step(bad_step)
+
+
+def test_validate_d_fine_step_rejects_bool():
+    with pytest.raises(InvalidConfigurationError):
+        validate_d_fine_step(True)
+
+
+@pytest.mark.parametrize("bad_radius", [0.0, -0.09])
+def test_validate_d_fine_radius_rejects_non_positive(bad_radius):
+    with pytest.raises(InvalidConfigurationError):
+        validate_d_fine_radius(bad_radius)
+
+
+def test_validate_d_fine_radius_rejects_bool():
+    with pytest.raises(InvalidConfigurationError):
+        validate_d_fine_radius(False)
+
+
+def test_validate_d_coarse_grid_accepts_none():
+    assert validate_d_coarse_grid(None) is None
+
+
+def test_validate_d_coarse_grid_accepts_valid():
+    result = validate_d_coarse_grid([0.0, 0.5, 1.0])
+    assert isinstance(result, np.ndarray)
+
+
+@pytest.mark.parametrize("bad_grid", [[], [0.1, np.nan], [0.1, np.inf], [-0.1, 0.2], [0.2, 1.2], [0.1, "bad"]])
+def test_validate_d_coarse_grid_rejects_invalid(bad_grid):
+    with pytest.raises(InvalidConfigurationError):
+        validate_d_coarse_grid(bad_grid)
+
+
+def test_validate_config_rejects_bad_d_fine_step():
+    with pytest.raises(InvalidConfigurationError):
+        validate_config(CyclicalTestConfig(d_fine_step=0.0))
+
+
+def test_validate_config_rejects_bad_d_fine_radius():
+    with pytest.raises(InvalidConfigurationError):
+        validate_config(CyclicalTestConfig(d_fine_radius=-1.0))
+
+
+def test_validate_config_rejects_bad_d_coarse_grid():
+    with pytest.raises(InvalidConfigurationError):
+        validate_config(CyclicalTestConfig(d_coarse_grid=np.array([1.5])))
+
+
+# ---------------------------------------------------------------------------
 # validate_mode
 # ---------------------------------------------------------------------------
 
@@ -221,6 +294,12 @@ def test_validate_config_rejects_invalid_statistic_mode():
 
 def test_validate_config_rejects_invalid_stochastic_cycle_mode():
     cfg = CyclicalTestConfig(stochastic_cycle_mode="triple")
+    with pytest.raises(InvalidConfigurationError):
+        validate_config(cfg)
+
+
+def test_validate_config_rejects_invalid_error_model():
+    cfg = CyclicalTestConfig(error_model="ar3")
     with pytest.raises(InvalidConfigurationError):
         validate_config(cfg)
 
@@ -316,5 +395,4 @@ def test_validate_cycles_accepts_multi_cycle_when_allowed():
     cycles = [StochasticCycle(R=25, D=0.4), StochasticCycle(R=30, D=0.2)]
     result = validate_cycles(cycles, allow_multi_cycle=True)
     assert len(result) == 2
-
 

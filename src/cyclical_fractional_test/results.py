@@ -54,6 +54,7 @@ class AdaptiveDSearchResult:
     n_coarse_evaluated: int  # Distinct coarse D values evaluated.
     n_fine_evaluated: int  # Distinct fine D values evaluated (excludes reused ones).
     n_candidates_evaluated: int  # Total distinct (R,D) candidates evaluated for this R.
+    all_results: List[GridCandidateResult] = field(default_factory=list)  # Every distinct (R,D) candidate evaluated for this R.
 
 
 @dataclass
@@ -62,6 +63,7 @@ class CyclicalFractionalTestResult:
 
     best_result: Optional[GridCandidateResult] = None  # Best candidate found.
     top_k_results: List[GridCandidateResult] = field(default_factory=list)  # Retained top-k candidates.
+    under_threshold_results: Optional[Dict[int, List[GridCandidateResult]]] = None  # Candidates scoring below the requested threshold, grouped by R; None when no threshold was requested.
     r_peak: Optional[int] = None  # Main periodogram peak used to build the R grid.
     r_candidates: Optional[np.ndarray] = None  # R values considered around r_peak.
     d_grid: Optional[np.ndarray] = None  # D values evaluated in the grid.

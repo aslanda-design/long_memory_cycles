@@ -4,6 +4,7 @@ import pytest
 from cyclical_fractional_test.exceptions import InvalidConfigurationError, InvalidSeriesError
 from cyclical_fractional_test.results import StochasticCycle
 from cyclical_fractional_test.spectral import (
+    compute_ar_spectral_adjustment,
     compute_document_periodogram,
     compute_frequency_variance_dynamic,
     compute_frequency_variance_multi_cycle,
@@ -11,13 +12,183 @@ from cyclical_fractional_test.spectral import (
     compute_psi_dynamic,
     compute_psi_single_cycle,
     compute_residual_periodogram,
+    compute_xa_ar_adjusted,
+    compute_xa_ar1_single_cycle,
+    compute_xa_ar2_single_cycle,
     compute_xa_dynamic,
+    compute_xa_error_model,
     compute_xa_single_cycle,
     compute_xaa_dynamic,
+    compute_xaa_ar1_single_cycle,
+    compute_xaa_ar2_single_cycle,
+    compute_xaa_error_model,
     compute_xaa_single_cycle,
     find_periodogram_peak,
     find_top_periodogram_peaks,
 )
+
+
+# ---------------------------------------------------------------------------
+# AR error-model adjustments
+# ---------------------------------------------------------------------------
+
+
+def test_ar_spectral_adjustment_white_noise_returns_ones():
+    lambdas = 2.0 * np.pi * np.arange(8) / 8
+    np.testing.assert_array_equal(
+        compute_ar_spectral_adjustment(lambdas, np.array([])),
+        np.ones(8),
+    )
+
+
+@pytest.mark.parametrize("coefficients", [np.array([0.4]), np.array([0.5, -0.2])])
+def test_ar_spectral_adjustment_is_finite_and_positive(coefficients):
+    lambdas = 2.0 * np.pi * np.arange(32) / 32
+    adjustment = compute_ar_spectral_adjustment(lambdas, coefficients)
+    assert np.all(np.isfinite(adjustment))
+    assert np.all(adjustment > 0.0)
+
+
+def test_ar_spectral_adjustment_protects_near_zero_denominator():
+    lambdas = np.array([0.0, np.pi])
+    adjustment = compute_ar_spectral_adjustment(lambdas, np.array([1.0]))
+    assert np.all(np.isfinite(adjustment))
+    assert np.all(adjustment > 0.0)
+
+
+def test_xa_ar_adjusted_matches_formula():
+    psi = np.array([1.0, 2.0, 3.0])
+    periodogram = np.array([0.5, 1.0, 1.5])
+    adjustment = np.array([1.0, 2.0, 4.0])
+    expected = -(2.0 * np.pi / 3.0) * np.sum(psi * periodogram / adjustment)
+    assert np.isclose(
+        compute_xa_ar_adjusted(psi, periodogram, adjustment), expected
+    )
+
+
+def test_xa_error_model_white_noise_matches_existing_function():
+    psi = np.array([1.0, 2.0, 3.0])
+    periodogram = np.array([0.5, 1.0, 1.5])
+    assert np.isclose(
+        compute_xa_error_model(psi, periodogram, "white_noise", np.ones(3)),
+        compute_xa_single_cycle(psi, periodogram),
+    )
+
+
+@pytest.mark.parametrize(
+    "error_model, coefficients, direct_function",
+    [
+        ("ar1", np.array([0.4]), compute_xa_ar1_single_cycle),
+        ("ar2", np.array([0.5, -0.2]), compute_xa_ar2_single_cycle),
+    ],
+)
+def test_xa_error_model_single_cycle_matches_explicit_ar_function(
+    error_model, coefficients, direct_function
+):
+    lambdas = 2.0 * np.pi * np.arange(4) / 4
+    psi = np.array([1.0, 2.0, 3.0, 4.0])
+    periodogram = np.array([0.5, 1.0, 1.5, 2.0])
+    adjustment = compute_ar_spectral_adjustment(lambdas, coefficients)
+    assert np.isclose(
+        compute_xa_error_model(
+            psi, periodogram, error_model, adjustment, "single"
+        ),
+        direct_function(psi, periodogram, adjustment),
+    )
+
+
+@pytest.mark.parametrize(
+    "error_model, coefficients",
+    [("ar1", np.array([0.4])), ("ar2", np.array([0.5, -0.2]))],
+)
+def test_xa_error_model_multi_cycle_routes_to_ar_placeholder(
+    error_model, coefficients
+):
+    lambdas = 2.0 * np.pi * np.arange(4) / 4
+    adjustment = compute_ar_spectral_adjustment(lambdas, coefficients)
+    with pytest.raises(NotImplementedError, match=f"Multi-cycle AR\\({error_model[-1]}\\) XA"):
+        compute_xa_error_model(
+            np.ones(4),
+            np.ones(4),
+            error_model,
+            adjustment,
+            stochastic_cycle_mode="multi_cycle",
+        )
+
+
+@pytest.mark.parametrize(
+    "error_model, coefficients, direct_function",
+    [
+        ("ar1", np.array([0.4]), compute_xaa_ar1_single_cycle),
+        ("ar2", np.array([0.5, -0.2]), compute_xaa_ar2_single_cycle),
+    ],
+)
+def test_xaa_error_model_single_cycle_matches_explicit_ar_function(
+    error_model, coefficients, direct_function
+):
+    T = 32
+    lambdas = 2.0 * np.pi * np.arange(T) / T
+    psi = compute_psi_single_cycle(T, R=4)
+    xaa = compute_xaa_error_model(psi, lambdas, error_model, coefficients)
+    assert np.isfinite(xaa)
+    assert xaa > 0.0
+    assert np.isclose(xaa, direct_function(psi, lambdas, coefficients))
+
+
+def test_xaa_ar1_single_cycle_matches_formula():
+    T = 16
+    lambdas = 2.0 * np.pi * np.arange(T) / T
+    psi = compute_psi_single_cycle(T, R=3)
+    coefficients = np.array([0.4])
+    adjustment = compute_ar_spectral_adjustment(lambdas, coefficients)
+    epsilon = 2.0 * (np.cos(lambdas) - coefficients[0]) * adjustment
+    correction = np.sum(psi * epsilon) ** 2 / np.sum(epsilon ** 2)
+    expected = (2.0 / T) * (np.sum(psi ** 2) - correction)
+    assert np.isclose(
+        compute_xaa_ar1_single_cycle(psi, lambdas, coefficients), expected
+    )
+
+
+def test_xaa_ar2_single_cycle_matches_formula():
+    T = 16
+    lambdas = 2.0 * np.pi * np.arange(T) / T
+    psi = compute_psi_single_cycle(T, R=3)
+    coefficients = np.array([0.5, -0.2])
+    adjustment = compute_ar_spectral_adjustment(lambdas, coefficients)
+    phi_1, phi_2 = coefficients
+    epsilon = np.column_stack(
+        (
+            2.0 * (np.cos(lambdas) - phi_1 - phi_2 * np.cos(lambdas))
+            * adjustment,
+            2.0 * (np.cos(2.0 * lambdas) - phi_1 * np.cos(lambdas) - phi_2)
+            * adjustment,
+        )
+    )
+    s_psi_epsilon = epsilon.T @ psi
+    correction = s_psi_epsilon.T @ np.linalg.solve(
+        epsilon.T @ epsilon, s_psi_epsilon
+    )
+    expected = (2.0 / T) * (np.sum(psi ** 2) - correction)
+    assert np.isclose(
+        compute_xaa_ar2_single_cycle(psi, lambdas, coefficients), expected
+    )
+
+
+@pytest.mark.parametrize(
+    "error_model, coefficients",
+    [("ar1", np.array([0.4])), ("ar2", np.array([0.5, -0.2]))],
+)
+def test_xaa_error_model_multi_cycle_routes_to_ar_placeholder(
+    error_model, coefficients
+):
+    with pytest.raises(NotImplementedError, match=f"Multi-cycle AR\\({error_model[-1]}\\) XAA"):
+        compute_xaa_error_model(
+            np.ones(4),
+            np.arange(4, dtype=float),
+            error_model,
+            coefficients,
+            stochastic_cycle_mode="multi_cycle",
+        )
 
 
 # ---------------------------------------------------------------------------

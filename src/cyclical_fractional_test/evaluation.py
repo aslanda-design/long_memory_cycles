@@ -139,6 +139,7 @@ def evaluate_r_with_adaptive_d(
         n_coarse_evaluated=n_coarse,
         n_fine_evaluated=n_fine,
         n_candidates_evaluated=len(results_by_d),
+        all_results=list(results_by_d.values()),
     )
 
 
