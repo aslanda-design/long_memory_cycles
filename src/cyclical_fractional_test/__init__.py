@@ -26,6 +26,7 @@ from .grid import (
     build_d_grid_for_strategy,
     build_default_d_coarse_grid,
     build_multi_cycle_candidate_grid,
+    build_multi_cycle_candidate_grid_from_d_grids,
     build_r_grid_around_peak,
     build_single_cycle_candidate_grid,
     candidate_iterator,
@@ -153,6 +154,7 @@ __all__ = [
     "build_d_grid_for_strategy",
     "build_single_cycle_candidate_grid",
     "build_multi_cycle_candidate_grid",
+    "build_multi_cycle_candidate_grid_from_d_grids",
     "candidate_iterator",
     # filters — Wave 6
     "compute_mu",

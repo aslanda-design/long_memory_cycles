@@ -61,6 +61,19 @@ def validate_n_deterministic_cycles(n: Any) -> int:
     return n
 
 
+def validate_n_stochastic_cycles(n: Any) -> int:
+    """Check the requested number of simultaneous stochastic cycles."""
+    if not isinstance(n, int) or isinstance(n, bool):
+        raise InvalidConfigurationError(
+            f"n_stochastic_cycles must be an int, got {type(n).__name__}."
+        )
+    if n < 1:
+        raise InvalidConfigurationError(
+            f"n_stochastic_cycles must be >= 1, got {n}."
+        )
+    return n
+
+
 def validate_top_k(top_k: Any) -> int:
     """Check how many ranked candidates should be kept."""
     if not isinstance(top_k, int) or isinstance(top_k, bool):
@@ -229,9 +242,9 @@ def validate_cycle(cycle: Any, T: Optional[int] = None) -> "StochasticCycle":
         raise InvalidCycleError(
             f"StochasticCycle.R must be an int, got {type(R).__name__} ({R!r})."
         )
-    if R <= 0:
+    if R < 0:
         raise InvalidCycleError(
-            f"StochasticCycle.R must be > 0, got {R}."
+            f"StochasticCycle.R must be >= 0, got {R}."
         )
     if T is not None and R >= T:
         raise InvalidCycleError(
@@ -314,6 +327,7 @@ def validate_config(config: Any) -> "CyclicalTestConfig":
     validate_mode(
         config.stochastic_cycle_mode, _STOCHASTIC_CYCLE_MODES, "stochastic_cycle_mode"
     )
+    validate_n_stochastic_cycles(config.n_stochastic_cycles)
     validate_mode(config.error_model, _ERROR_MODELS, "error_model")
     validate_boolean(config.drop_singular_frequency, "drop_singular_frequency")
     validate_boolean(config.exclude_zero_frequency, "exclude_zero_frequency")

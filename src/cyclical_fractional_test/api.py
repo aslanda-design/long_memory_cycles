@@ -14,13 +14,20 @@ from .diagnostics import build_test_diagnostics
 from .evaluation import evaluate_candidate, evaluate_r_with_adaptive_d
 from .exceptions import InvalidConfigurationError
 from .grid import (
+    build_d_fine_grid,
     build_d_grid_for_strategy,
+    build_multi_cycle_candidate_grid,
+    build_multi_cycle_candidate_grid_from_d_grids,
     build_r_grid_around_peak,
     build_single_cycle_candidate_grid,
 )
-from .results import CyclicalFractionalTestResult, GridCandidateResult
+from .results import CyclicalFractionalTestResult, GridCandidateResult, StochasticCycle
 from .scoring import TopKSelector, score_candidate
-from .spectral import compute_document_periodogram, find_periodogram_peak
+from .spectral import (
+    compute_document_periodogram,
+    find_periodogram_peak,
+    find_top_periodogram_peaks,
+)
 from .validation import validate_config, validate_series
 
 
@@ -40,11 +47,13 @@ def run_cyclical_fractional_test(
     threshold: Optional[float] = None,
     **kwargs: Any,
 ) -> CyclicalFractionalTestResult:
-    """Run the fractional cyclic long-memory test in single-cycle mode.
+    """Run the fractional cyclic long-memory test.
 
     If config is None, CyclicalTestConfig defaults are used.
     kwargs override individual config fields (e.g., top_k=3 or error_model="ar1").
-    Only stochastic_cycle_mode='single' is supported; other modes raise NotImplementedError.
+    stochastic_cycle_mode='single' searches one cycle. stochastic_cycle_mode='multi_cycle'
+    selects the top n_stochastic_cycles periodogram peaks and evaluates joint
+    fixed-grid or adaptive Cartesian products of D values for those simultaneous cycles.
     The result includes a TestDiagnostics object and per-candidate AR nuisance estimates.
 
     If threshold is given (a positive float), the result's under_threshold_results
@@ -62,11 +71,11 @@ def run_cyclical_fractional_test(
 
     threshold_value = _validate_threshold(threshold) if threshold is not None else None
 
-    if config.stochastic_cycle_mode != "single":
+    if config.stochastic_cycle_mode == "multi_peak_single_cycle":
         raise NotImplementedError(
             f"stochastic_cycle_mode={config.stochastic_cycle_mode!r} is not yet "
             "supported in run_cyclical_fractional_test. "
-            "Use stochastic_cycle_mode='single'."
+            "Use stochastic_cycle_mode='single' or 'multi_cycle'."
         )
 
     T = len(arr)
@@ -74,12 +83,30 @@ def run_cyclical_fractional_test(
 
     lambdas_y, I_y = compute_document_periodogram(arr)
     periodogram = I_y[:len(I_y) // 2]
-    r_peak = find_periodogram_peak(periodogram, exclude_zero=config.exclude_zero_frequency)
-
-    r_candidates = build_r_grid_around_peak(r_peak, config.r_window, T)
 
     # The reported grid is the full fixed grid, or the coarse seed for adaptive search.
     d_grid = build_d_grid_for_strategy(config)
+
+    if config.stochastic_cycle_mode == "multi_cycle":
+        return _run_multi_cycle_fractional_test(
+            arr=arr,
+            X=X,
+            lambdas_y=lambdas_y,
+            I_y=I_y,
+            periodogram=periodogram,
+            d_grid=d_grid,
+            config=config,
+            threshold_value=threshold_value,
+        )
+
+    r_peak = find_periodogram_peak(periodogram, exclude_zero=config.exclude_zero_frequency)
+
+    r_candidates = build_r_grid_around_peak(
+        r_peak,
+        config.r_window,
+        T,
+        include_zero=not config.exclude_zero_frequency,
+    )
 
     selector = TopKSelector(k=config.top_k, statistic_mode=config.statistic_mode)
 
@@ -182,6 +209,153 @@ def run_cyclical_fractional_test(
     )
 
 
+def _run_multi_cycle_fractional_test(
+    *,
+    arr: np.ndarray,
+    X: np.ndarray,
+    lambdas_y: np.ndarray,
+    I_y: np.ndarray,
+    periodogram: np.ndarray,
+    d_grid: np.ndarray,
+    config: CyclicalTestConfig,
+    threshold_value: Optional[float],
+) -> CyclicalFractionalTestResult:
+    """Run the scalar aggregate-ψ multi-cycle joint D search."""
+    r_candidates = find_top_periodogram_peaks(
+        periodogram,
+        n_peaks=config.n_stochastic_cycles,
+        exclude_zero=config.exclude_zero_frequency,
+    )
+    r_peak = int(r_candidates[0])
+
+    under_threshold_results: Optional[Dict[int, List[GridCandidateResult]]] = (
+        {} if threshold_value is not None else None
+    )
+
+    n_evaluated = 0
+    warnings: List[str] = []
+    adaptive_info: Optional[dict] = None
+    selector = TopKSelector(k=config.top_k, statistic_mode=config.statistic_mode)
+
+    if config.d_search_strategy == "fixed_grid":
+        for cycles in build_multi_cycle_candidate_grid(r_candidates, d_grid):
+            candidate = evaluate_candidate(arr, X, cycles, config)
+            _log_multi_cycle_candidate(candidate, config.statistic_mode)
+            selector.consider(candidate)
+            if under_threshold_results is not None:
+                _record_if_under_threshold(
+                    under_threshold_results,
+                    candidate,
+                    threshold_value,
+                    config.statistic_mode,
+                )
+            n_evaluated += 1
+    else:
+        results_by_d: Dict[Tuple[float, ...], GridCandidateResult] = {}
+        n_coarse = 0
+        n_fine = 0
+
+        for cycles in build_multi_cycle_candidate_grid(r_candidates, d_grid):
+            key = _cycles_d_key(cycles)
+            if key in results_by_d:
+                continue
+            candidate = evaluate_candidate(arr, X, cycles, config)
+            results_by_d[key] = candidate
+            _log_multi_cycle_candidate(
+                candidate, config.statistic_mode, label="multi-cycle coarse candidate"
+            )
+            selector.consider(candidate)
+            if under_threshold_results is not None:
+                _record_if_under_threshold(
+                    under_threshold_results,
+                    candidate,
+                    threshold_value,
+                    config.statistic_mode,
+                )
+            n_coarse += 1
+
+        best_coarse_d = min(
+            results_by_d,
+            key=lambda key: score_candidate(results_by_d[key], config.statistic_mode),
+        )
+        fine_d_grids = [
+            build_d_fine_grid(
+                center,
+                config.d_fine_radius,
+                config.d_fine_step,
+            )
+            for center in best_coarse_d
+        ]
+        for cycles in build_multi_cycle_candidate_grid_from_d_grids(
+            r_candidates, fine_d_grids
+        ):
+            key = _cycles_d_key(cycles)
+            if key in results_by_d:
+                continue
+            candidate = evaluate_candidate(arr, X, cycles, config)
+            results_by_d[key] = candidate
+            _log_multi_cycle_candidate(
+                candidate, config.statistic_mode, label="multi-cycle fine candidate"
+            )
+            selector.consider(candidate)
+            if under_threshold_results is not None:
+                _record_if_under_threshold(
+                    under_threshold_results,
+                    candidate,
+                    threshold_value,
+                    config.statistic_mode,
+                )
+            n_fine += 1
+
+        best_result = selector.get_best()
+        if best_result is None:
+            raise InvalidConfigurationError(
+                "No multi-cycle adaptive candidates were evaluated."
+            )
+        n_evaluated = n_coarse + n_fine
+        adaptive_info = {
+            "d_coarse_grid": d_grid,
+            "d_fine_step": config.d_fine_step,
+            "d_fine_radius": config.d_fine_radius,
+            "best_coarse_d_per_r": [float(value) for value in best_coarse_d],
+            "final_d_per_r": [cycle.D for cycle in best_result.cycles],
+            "n_coarse_evaluations": n_coarse,
+            "n_fine_evaluations": n_fine,
+        }
+
+    if under_threshold_results is not None:
+        under_threshold_results = {
+            R: sorted(candidates, key=lambda c: score_candidate(c, config.statistic_mode))
+            for R, candidates in sorted(under_threshold_results.items())
+        }
+
+    diagnostics = build_test_diagnostics(
+        n_candidates_evaluated=n_evaluated,
+        n_valid_candidates=n_evaluated,
+        n_failed_candidates=0,
+        warnings=warnings,
+        lambdas_y=lambdas_y,
+        periodogram_y=I_y,
+        r_peak=r_peak,
+        r_candidates=r_candidates,
+        d_grid=d_grid,
+        config=config,
+        adaptive_info=adaptive_info,
+    )
+
+    return CyclicalFractionalTestResult(
+        best_result=selector.get_best(),
+        top_k_results=selector.get_top_k(),
+        r_peak=r_peak,
+        r_candidates=r_candidates,
+        d_grid=d_grid,
+        config=config,
+        n_candidates_evaluated=n_evaluated,
+        diagnostics=diagnostics,
+        under_threshold_results=under_threshold_results,
+    )
+
+
 def _validate_threshold(threshold: Any) -> float:
     """Return threshold as a positive finite float, or raise InvalidConfigurationError."""
     if isinstance(threshold, bool):
@@ -206,3 +380,35 @@ def _record_if_under_threshold(
     """Append candidate to bucket[R] when its statistic score is below threshold."""
     if score_candidate(candidate, statistic_mode) < threshold:
         bucket.setdefault(int(candidate.cycles[0].R), []).append(candidate)
+
+
+def _log_multi_cycle_candidate(
+    candidate: GridCandidateResult,
+    statistic_mode: str,
+    *,
+    label: str = "multi-cycle candidate",
+) -> None:
+    """Log the statistic values for one evaluated multi-cycle candidate."""
+    logger.info(
+        "%s cycles=%s TEST=%.6g TEST*=%.6g score(%s)=%.6g XA=%.6g XAA=%.6g",
+        label,
+        _format_cycles_for_log(candidate.cycles),
+        candidate.test_value,
+        candidate.test_star_value,
+        statistic_mode,
+        score_candidate(candidate, statistic_mode),
+        candidate.xa,
+        candidate.xaa,
+    )
+
+
+def _format_cycles_for_log(cycles: Tuple[StochasticCycle, ...]) -> str:
+    """Return a compact cycles string for logging."""
+    return "[" + ", ".join(
+        f"(R={cycle.R},D={cycle.D:.4f})" for cycle in cycles
+    ) + "]"
+
+
+def _cycles_d_key(cycles: Tuple[StochasticCycle, ...]) -> Tuple[float, ...]:
+    """Return the rounded D-vector key used to de-duplicate adaptive candidates."""
+    return tuple(round(float(cycle.D), 12) for cycle in cycles)

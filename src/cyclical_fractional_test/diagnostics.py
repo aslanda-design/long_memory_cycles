@@ -37,13 +37,14 @@ class VarianceComparison:
 class TestDiagnostics:
     """Run-level diagnostic summary attached to CyclicalFractionalTestResult."""
 
-    n_candidates_evaluated: int  # Total (R,D) pairs passed to evaluate_candidate.
-    n_valid_candidates: int  # Pairs that returned a finite result.
-    n_failed_candidates: int  # Pairs that raised an error (0 under Policy A).
+    n_candidates_evaluated: int  # Total candidates passed to evaluate_candidate.
+    n_valid_candidates: int  # Candidates that returned a finite result.
+    n_failed_candidates: int  # Candidates that raised an error (0 under Policy A).
     warnings: List[str]  # Warning messages accumulated during the run.
     periodogram_summary: Optional[PeriodogramSummary]  # Input periodogram info.
     selected_statistic_mode: str  # config.statistic_mode used for ranking.
     stochastic_cycle_mode: str  # config.stochastic_cycle_mode used.
+    n_stochastic_cycles: int  # Number of stochastic cycles requested.
     error_model: str  # config.error_model used for residual errors.
     r_peak: Optional[int]  # Main periodogram peak index.
     r_candidates_count: int  # Number of R values in the search grid.
@@ -51,10 +52,10 @@ class TestDiagnostics:
     d_search_strategy: str = "adaptive"  # "adaptive" or "fixed_grid".
     d_fine_step: Optional[float] = None  # Fine-grid step (adaptive search only).
     d_fine_radius: Optional[float] = None  # Fine-grid half-width (adaptive search only).
-    best_coarse_d_per_r: Optional[List[float]] = None  # Best coarse D for each R (adaptive).
-    final_d_per_r: Optional[List[float]] = None  # Final refined D for each R (adaptive).
-    n_coarse_evaluations: Optional[int] = None  # Coarse (R,D) candidates evaluated (adaptive).
-    n_fine_evaluations: Optional[int] = None  # Fine (R,D) candidates evaluated (adaptive).
+    best_coarse_d_per_r: Optional[List[float]] = None  # Best coarse D values in R order (adaptive).
+    final_d_per_r: Optional[List[float]] = None  # Final refined D values in R order (adaptive).
+    n_coarse_evaluations: Optional[int] = None  # Coarse candidates evaluated (adaptive).
+    n_fine_evaluations: Optional[int] = None  # Fine candidates evaluated (adaptive).
 
 
 def summarize_periodogram(
@@ -203,6 +204,7 @@ def build_test_diagnostics(
         periodogram_summary=periodogram_summary,
         selected_statistic_mode=getattr(config, "statistic_mode", "unknown"),
         stochastic_cycle_mode=getattr(config, "stochastic_cycle_mode", "unknown"),
+        n_stochastic_cycles=getattr(config, "n_stochastic_cycles", 1),
         error_model=getattr(config, "error_model", "unknown"),
         r_peak=r_peak,
         r_candidates_count=r_count,

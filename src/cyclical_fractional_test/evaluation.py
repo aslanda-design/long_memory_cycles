@@ -198,5 +198,5 @@ def _validate_evaluate_r_with_adaptive_d(
     validate_config(config)
     if isinstance(R, bool) or not isinstance(R, (int, np.integer)):
         raise InvalidCycleError(f"R must be an int, got {type(R).__name__}.")
-    if int(R) <= 0:
-        raise InvalidCycleError(f"R must be > 0, got {R}.")
+    if int(R) < 0:
+        raise InvalidCycleError(f"R must be >= 0, got {R}.")

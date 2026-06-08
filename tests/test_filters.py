@@ -5,8 +5,10 @@ from cyclical_fractional_test.exceptions import InvalidConfigurationError, Inval
 from cyclical_fractional_test.filters import (
     apply_filter_dynamic,
     apply_fractional_filter_single_series,
+    apply_multi_cycle_filter,
     apply_single_cycle_filter,
     compute_fractional_coefficients_dynamic,
+    compute_fractional_coefficients_multi_cycle,
     compute_fractional_coefficients_single_cycle,
     compute_mu,
     filter_response_and_design,
@@ -24,7 +26,11 @@ def test_compute_mu_matches_formula():
     assert np.isclose(compute_mu(T, R), np.cos(2 * np.pi * R / T))
 
 
-@pytest.mark.parametrize("R", [0, -1, 10, 11])
+def test_compute_mu_accepts_zero_frequency():
+    assert compute_mu(10, 0) == pytest.approx(1.0)
+
+
+@pytest.mark.parametrize("R", [-1, 10, 11])
 def test_compute_mu_rejects_R_out_of_range(R):
     with pytest.raises((InvalidConfigurationError, ValueError)):
         compute_mu(10, R)
@@ -68,6 +74,16 @@ def test_d_one_matches_second_order_polynomial():
     np.testing.assert_allclose(coeffs, expected, atol=1e-12)
 
 
+def test_r_zero_d_one_matches_non_cyclic_second_difference():
+    """R=0, D=1 → (1 - 2L + L²) = (1 - L)²."""
+    coeffs = compute_fractional_coefficients_single_cycle(T=8, R=0, D=1.0)
+    expected = np.zeros(8)
+    expected[0] = 1.0
+    expected[1] = -2.0
+    expected[2] = 1.0
+    np.testing.assert_allclose(coeffs, expected, atol=1e-12)
+
+
 def test_fractional_d_satisfies_recurrence():
     """Verify C_j = [2μ(j-1-D)C_{j-1} + (2D-j+2)C_{j-2}] / j for j≥2."""
     T, R, D = 5, 1, 0.5
@@ -90,7 +106,7 @@ def test_fractional_coefficients_rejects_invalid_D(bad_D):
         compute_fractional_coefficients_single_cycle(10, 2, bad_D)
 
 
-@pytest.mark.parametrize("T,R", [(0, 1), (1, 1), (10, 0), (10, 10)])
+@pytest.mark.parametrize("T,R", [(0, 1), (1, 1), (10, -1), (10, 10)])
 def test_fractional_coefficients_rejects_invalid_T_R(T, R):
     with pytest.raises((InvalidConfigurationError, ValueError)):
         compute_fractional_coefficients_single_cycle(T, R, 0.5)
@@ -104,10 +120,24 @@ def test_fractional_coefficients_dynamic_matches_direct():
     np.testing.assert_allclose(result, expected)
 
 
-def test_fractional_coefficients_dynamic_multi_cycle_not_implemented():
+def test_fractional_coefficients_multi_cycle_matches_truncated_convolution():
+    T = 12
     cycles = [StochasticCycle(R=2, D=0.4), StochasticCycle(R=4, D=0.2)]
-    with pytest.raises(NotImplementedError):
-        compute_fractional_coefficients_dynamic(10, cycles, mode="multi_cycle")
+    c1 = compute_fractional_coefficients_single_cycle(T, cycles[0].R, cycles[0].D)
+    c2 = compute_fractional_coefficients_single_cycle(T, cycles[1].R, cycles[1].D)
+    expected = np.convolve(c1, c2, mode="full")[:T]
+    np.testing.assert_allclose(
+        compute_fractional_coefficients_multi_cycle(T, cycles), expected
+    )
+
+
+def test_fractional_coefficients_dynamic_multi_cycle_matches_direct():
+    T = 12
+    cycles = [StochasticCycle(R=2, D=0.4), StochasticCycle(R=4, D=0.2)]
+    np.testing.assert_allclose(
+        compute_fractional_coefficients_dynamic(T, cycles, mode="multi_cycle"),
+        compute_fractional_coefficients_multi_cycle(T, cycles),
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -225,3 +255,24 @@ def test_apply_filter_dynamic_single_mode_matches_direct():
     cycles = [StochasticCycle(R=2, D=0.5)]
     expected = apply_single_cycle_filter(x, cycles[0], T)
     np.testing.assert_allclose(apply_filter_dynamic(x, cycles, T, mode="single"), expected)
+
+
+def test_multi_cycle_coefficients_match_chained_filter():
+    T = 14
+    x = np.random.default_rng(8).standard_normal(T)
+    cycles = [StochasticCycle(R=2, D=0.4), StochasticCycle(R=5, D=0.3)]
+    coeffs = compute_fractional_coefficients_multi_cycle(T, cycles)
+    expected = apply_multi_cycle_filter(x, cycles, T)
+    np.testing.assert_allclose(
+        apply_fractional_filter_single_series(x, coeffs), expected
+    )
+
+
+def test_apply_filter_dynamic_multi_cycle_matches_direct():
+    T = 14
+    x = np.random.default_rng(9).standard_normal(T)
+    cycles = [StochasticCycle(R=2, D=0.4), StochasticCycle(R=5, D=0.3)]
+    np.testing.assert_allclose(
+        apply_filter_dynamic(x, cycles, T, mode="multi_cycle"),
+        apply_multi_cycle_filter(x, cycles, T),
+    )

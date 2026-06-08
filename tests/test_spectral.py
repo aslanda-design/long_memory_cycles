@@ -10,18 +10,25 @@ from cyclical_fractional_test.spectral import (
     compute_frequency_variance_multi_cycle,
     compute_frequency_variance_single_cycle,
     compute_psi_dynamic,
+    compute_psi_multi_cycle,
     compute_psi_single_cycle,
     compute_residual_periodogram,
     compute_xa_ar_adjusted,
+    compute_xa_ar1_multi_cycle,
     compute_xa_ar1_single_cycle,
+    compute_xa_ar2_multi_cycle,
     compute_xa_ar2_single_cycle,
     compute_xa_dynamic,
     compute_xa_error_model,
+    compute_xa_multi_cycle,
     compute_xa_single_cycle,
     compute_xaa_dynamic,
+    compute_xaa_ar1_multi_cycle,
     compute_xaa_ar1_single_cycle,
+    compute_xaa_ar2_multi_cycle,
     compute_xaa_ar2_single_cycle,
     compute_xaa_error_model,
+    compute_xaa_multi_cycle,
     compute_xaa_single_cycle,
     find_periodogram_peak,
     find_top_periodogram_peaks,
@@ -98,22 +105,29 @@ def test_xa_error_model_single_cycle_matches_explicit_ar_function(
 
 
 @pytest.mark.parametrize(
-    "error_model, coefficients",
-    [("ar1", np.array([0.4])), ("ar2", np.array([0.5, -0.2]))],
+    "error_model, coefficients, direct_function",
+    [
+        ("ar1", np.array([0.4]), compute_xa_ar1_multi_cycle),
+        ("ar2", np.array([0.5, -0.2]), compute_xa_ar2_multi_cycle),
+    ],
 )
-def test_xa_error_model_multi_cycle_routes_to_ar_placeholder(
-    error_model, coefficients
+def test_xa_error_model_multi_cycle_matches_explicit_ar_function(
+    error_model, coefficients, direct_function
 ):
     lambdas = 2.0 * np.pi * np.arange(4) / 4
+    psi_multi = np.array([1.0, 2.0, 3.0, 4.0])
+    periodogram = np.array([0.5, 1.0, 1.5, 2.0])
     adjustment = compute_ar_spectral_adjustment(lambdas, coefficients)
-    with pytest.raises(NotImplementedError, match=f"Multi-cycle AR\\({error_model[-1]}\\) XA"):
+    assert np.isclose(
         compute_xa_error_model(
-            np.ones(4),
-            np.ones(4),
+            psi_multi,
+            periodogram,
             error_model,
             adjustment,
             stochastic_cycle_mode="multi_cycle",
-        )
+        ),
+        direct_function(psi_multi, periodogram, adjustment),
+    )
 
 
 @pytest.mark.parametrize(
@@ -175,20 +189,30 @@ def test_xaa_ar2_single_cycle_matches_formula():
 
 
 @pytest.mark.parametrize(
-    "error_model, coefficients",
-    [("ar1", np.array([0.4])), ("ar2", np.array([0.5, -0.2]))],
+    "error_model, coefficients, direct_function",
+    [
+        ("ar1", np.array([0.4]), compute_xaa_ar1_multi_cycle),
+        ("ar2", np.array([0.5, -0.2]), compute_xaa_ar2_multi_cycle),
+    ],
 )
-def test_xaa_error_model_multi_cycle_routes_to_ar_placeholder(
-    error_model, coefficients
+def test_xaa_error_model_multi_cycle_matches_explicit_ar_function(
+    error_model, coefficients, direct_function
 ):
-    with pytest.raises(NotImplementedError, match=f"Multi-cycle AR\\({error_model[-1]}\\) XAA"):
-        compute_xaa_error_model(
-            np.ones(4),
-            np.arange(4, dtype=float),
-            error_model,
-            coefficients,
-            stochastic_cycle_mode="multi_cycle",
-        )
+    T = 32
+    lambdas = 2.0 * np.pi * np.arange(T) / T
+    psi_multi = compute_psi_multi_cycle(
+        T, [StochasticCycle(R=4, D=0.3), StochasticCycle(R=7, D=0.2)]
+    )
+    xaa = compute_xaa_error_model(
+        psi_multi,
+        lambdas,
+        error_model,
+        coefficients,
+        stochastic_cycle_mode="multi_cycle",
+    )
+    assert np.isfinite(xaa)
+    assert xaa > 0.0
+    assert np.isclose(xaa, direct_function(psi_multi, lambdas, coefficients))
 
 
 # ---------------------------------------------------------------------------
@@ -325,6 +349,12 @@ def test_psi_R_equals_T_half_single_zero():
     assert np.all(np.isfinite(psi))
 
 
+def test_psi_R_zero_singular_frequency_zeroed():
+    psi = compute_psi_single_cycle(T=100, R=0, drop_singular_frequency=True)
+    assert psi[0] == 0.0
+    assert np.all(np.isfinite(psi))
+
+
 def test_psi_matches_formula_at_non_singular_index():
     T, R, j = 100, 25, 10
     psi = compute_psi_single_cycle(T=T, R=R)
@@ -339,7 +369,12 @@ def test_psi_drop_false_gives_neg_inf_at_exact_singular():
     assert psi[25] == -np.inf
 
 
-@pytest.mark.parametrize("R", [0, -1, 100])
+def test_psi_R_zero_drop_false_gives_neg_inf_at_zero():
+    psi = compute_psi_single_cycle(T=100, R=0, drop_singular_frequency=False)
+    assert psi[0] == -np.inf
+
+
+@pytest.mark.parametrize("R", [-1, 100])
 def test_psi_rejects_invalid_R(R):
     with pytest.raises(InvalidConfigurationError):
         compute_psi_single_cycle(T=100, R=R)
@@ -350,6 +385,45 @@ def test_psi_rejects_non_integer_and_bool_R():
         compute_psi_single_cycle(T=100, R=25.5)  # type: ignore
     with pytest.raises(InvalidConfigurationError):
         compute_psi_single_cycle(T=100, R=True)  # type: ignore
+
+
+# ---------------------------------------------------------------------------
+# compute_psi_multi_cycle
+# ---------------------------------------------------------------------------
+
+
+def test_psi_multi_cycle_matches_sum_and_zeroes_singular_union():
+    T = 40
+    cycles = [StochasticCycle(R=4, D=0.3), StochasticCycle(R=9, D=0.2)]
+    expected = (
+        compute_psi_single_cycle(T, 4, drop_singular_frequency=False)
+        + compute_psi_single_cycle(T, 9, drop_singular_frequency=False)
+    )
+    for idx in [4, T - 4, 9, T - 9]:
+        expected[idx] = 0.0
+    result = compute_psi_multi_cycle(T, cycles, drop_singular_frequency=True)
+    np.testing.assert_allclose(result, expected)
+    assert np.all(np.isfinite(result))
+
+
+def test_psi_multi_cycle_drop_false_keeps_singularities():
+    psi = compute_psi_multi_cycle(
+        40,
+        [StochasticCycle(R=4, D=0.3), StochasticCycle(R=9, D=0.2)],
+        drop_singular_frequency=False,
+    )
+    assert psi[4] == -np.inf
+    assert psi[9] == -np.inf
+
+
+def test_psi_multi_cycle_supports_R_zero():
+    T = 40
+    cycles = [StochasticCycle(R=0, D=0.3), StochasticCycle(R=9, D=0.2)]
+    psi = compute_psi_multi_cycle(T, cycles, drop_singular_frequency=True)
+    assert psi[0] == 0.0
+    assert psi[9] == 0.0
+    assert psi[T - 9] == 0.0
+    assert np.all(np.isfinite(psi))
 
 
 # ---------------------------------------------------------------------------
@@ -378,6 +452,30 @@ def test_xaa_rejects_non_finite_or_empty():
         compute_xaa_single_cycle(np.array([1.0, np.nan, 2.0]))
     with pytest.raises(InvalidConfigurationError):
         compute_xaa_single_cycle(np.array([]))
+
+
+# ---------------------------------------------------------------------------
+# compute_xaa_multi_cycle
+# ---------------------------------------------------------------------------
+
+
+def test_xaa_multi_cycle_matches_formula():
+    T = 40
+    psi_multi = compute_psi_multi_cycle(
+        T, [StochasticCycle(R=4, D=0.3), StochasticCycle(R=9, D=0.2)]
+    )
+    expected = (2.0 / T) * np.sum(psi_multi ** 2)
+    assert np.isclose(compute_xaa_multi_cycle(psi_multi), expected)
+
+
+def test_xaa_dynamic_multi_cycle_matches_direct():
+    psi_multi = compute_psi_multi_cycle(
+        40, [StochasticCycle(R=4, D=0.3), StochasticCycle(R=9, D=0.2)]
+    )
+    assert np.isclose(
+        compute_xaa_dynamic(psi_multi, stochastic_cycle_mode="multi_cycle"),
+        compute_xaa_multi_cycle(psi_multi),
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -411,6 +509,32 @@ def test_xa_rejects_non_finite():
         compute_xa_single_cycle(np.array([1.0, np.nan, 3.0]), np.ones(3))
     with pytest.raises((InvalidConfigurationError, ValueError)):
         compute_xa_single_cycle(np.ones(3), np.array([1.0, np.inf, 3.0]))
+
+
+# ---------------------------------------------------------------------------
+# compute_xa_multi_cycle
+# ---------------------------------------------------------------------------
+
+
+def test_xa_multi_cycle_matches_formula():
+    psi_multi = np.array([1.0, 2.0, 3.0, 4.0])
+    I = np.array([0.5, 1.0, 1.5, 2.0])
+    expected = -(2.0 * np.pi / 4.0) * np.sum(psi_multi * I)
+    assert np.isclose(compute_xa_multi_cycle(psi_multi, I), expected)
+
+
+def test_xa_dynamic_multi_cycle_matches_direct():
+    psi_multi = np.array([1.0, 2.0, 3.0, 4.0])
+    I = np.array([0.5, 1.0, 1.5, 2.0])
+    assert np.isclose(
+        compute_xa_dynamic(
+            psi_multi,
+            I,
+            [StochasticCycle(R=1, D=0.3), StochasticCycle(R=2, D=0.2)],
+            mode="multi_cycle",
+        ),
+        compute_xa_multi_cycle(psi_multi, I),
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -474,9 +598,12 @@ def test_psi_dynamic_single_matches_direct():
     )
 
 
-def test_psi_dynamic_multi_cycle_not_implemented():
-    with pytest.raises(NotImplementedError):
-        compute_psi_dynamic(30, [_cycle(), _cycle(R=5)], stochastic_cycle_mode="multi_cycle")
+def test_psi_dynamic_multi_cycle_matches_direct():
+    cycles = [_cycle(), _cycle(R=5)]
+    np.testing.assert_allclose(
+        compute_psi_dynamic(30, cycles, stochastic_cycle_mode="multi_cycle"),
+        compute_psi_multi_cycle(30, cycles),
+    )
 
 
 def test_xaa_dynamic_single_matches_direct():

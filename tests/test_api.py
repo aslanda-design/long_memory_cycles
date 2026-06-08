@@ -38,6 +38,7 @@ def test_cyclical_result_empty_defaults():
 def test_config_default_values():
     cfg = CyclicalTestConfig()
     assert cfg.n_deterministic_cycles == 4
+    assert cfg.n_stochastic_cycles == 1
     assert cfg.top_k == 1
     assert cfg.stochastic_cycle_mode == "single"
     assert cfg.error_model == "white_noise"
@@ -72,6 +73,10 @@ def _small_config(**overrides):
 
 def _series(T=50, seed=0):
     return np.random.default_rng(seed).standard_normal(T)
+
+
+def _zero_dominant_series(T=60):
+    return np.ones(T)
 
 
 def _fixed_config(**overrides):
@@ -209,16 +214,183 @@ def test_default_config_runs():
     assert result.best_result is not None
 
 
-def test_multi_cycle_mode_not_implemented():
+def test_zero_frequency_excluded_by_default_even_when_dominant():
+    result = run_cyclical_fractional_test(
+        _zero_dominant_series(T=60),
+        config=CyclicalTestConfig(
+            n_deterministic_cycles=2,
+            d_search_strategy="fixed_grid",
+            d_grid=np.array([0.0]),
+            r_window=0,
+            top_k=1,
+            stochastic_cycle_mode="single",
+        ),
+    )
+    assert result.r_peak != 0
+    assert 0 not in set(int(R) for R in result.r_candidates)
+    assert result.best_result.cycles[0].R != 0
+
+
+def test_zero_frequency_can_be_selected_when_included():
+    result = run_cyclical_fractional_test(
+        _zero_dominant_series(T=60),
+        config=CyclicalTestConfig(
+            n_deterministic_cycles=2,
+            d_search_strategy="fixed_grid",
+            d_grid=np.array([0.0]),
+            r_window=0,
+            top_k=1,
+            stochastic_cycle_mode="single",
+            exclude_zero_frequency=False,
+        ),
+    )
+    assert result.r_peak == 0
+    np.testing.assert_array_equal(result.r_candidates, np.array([0]))
+    assert result.best_result.cycles[0].R == 0
+    assert np.isfinite(result.best_result.test_value)
+
+
+def test_multi_cycle_mode_runs_and_selects_requested_cycles():
     config = CyclicalTestConfig(
         n_deterministic_cycles=2,
+        d_search_strategy="fixed_grid",
+        d_grid=np.array([0.0, 0.5]),
+        top_k=3,
+        stochastic_cycle_mode="multi_cycle",
+        n_stochastic_cycles=2,
+    )
+    result = run_cyclical_fractional_test(_series(T=60, seed=21), config=config)
+    assert result.best_result is result.top_k_results[0]
+    assert len(result.top_k_results) == 3
+    assert len(result.best_result.cycles) == 2
+    assert [cycle.R for cycle in result.best_result.cycles] == [
+        int(R) for R in result.r_candidates
+    ]
+    assert result.r_peak == int(result.r_candidates[0])
+    assert result.n_candidates_evaluated == len(config.d_grid) ** 2
+    assert result.diagnostics.r_candidates_count == 2
+    assert result.diagnostics.n_stochastic_cycles == 2
+    assert np.isfinite(result.best_result.test_value)
+
+
+@pytest.mark.parametrize("error_model", ["white_noise", "ar1", "ar2"])
+def test_multi_cycle_mode_supports_error_models(error_model):
+    config = CyclicalTestConfig(
+        n_deterministic_cycles=2,
+        d_search_strategy="fixed_grid",
         d_grid=np.array([0.0]),
-        r_window=1,
         top_k=1,
         stochastic_cycle_mode="multi_cycle",
+        n_stochastic_cycles=2,
+        error_model=error_model,
     )
-    with pytest.raises(NotImplementedError):
-        run_cyclical_fractional_test(_series(), config=config)
+    result = run_cyclical_fractional_test(_series(T=80, seed=33), config=config)
+    assert result.best_result.error_model == error_model
+    assert len(result.best_result.cycles) == 2
+    assert np.isfinite(result.best_result.test_value)
+
+
+def test_multi_cycle_can_include_zero_frequency_when_included():
+    result = run_cyclical_fractional_test(
+        _zero_dominant_series(T=60),
+        config=CyclicalTestConfig(
+            n_deterministic_cycles=2,
+            d_search_strategy="fixed_grid",
+            d_grid=np.array([0.0]),
+            top_k=1,
+            stochastic_cycle_mode="multi_cycle",
+            n_stochastic_cycles=2,
+            exclude_zero_frequency=False,
+        ),
+    )
+    cycle_Rs = [cycle.R for cycle in result.best_result.cycles]
+    assert result.r_peak == 0
+    assert 0 in cycle_Rs
+    assert 0 in set(int(R) for R in result.r_candidates)
+    assert np.isfinite(result.best_result.test_value)
+
+
+def test_multi_cycle_fixed_grid_evaluates_joint_d_candidates(monkeypatch):
+    target_d = (0.0, 0.5)
+
+    def fake_evaluate_candidate(y, X, cycles, config):
+        assert len(cycles) == 2
+        d_values = tuple(cycle.D for cycle in cycles)
+        score = 0.0 if d_values == target_d else 10.0
+        return GridCandidateResult(
+            cycles=tuple(cycles),
+            error_model=config.error_model,
+            test_value=score,
+            test_star_value=score,
+            xa=score,
+            xaa=1.0,
+            variance_time=1.0,
+            variance_frequency=1.0,
+        )
+
+    monkeypatch.setattr(
+        "cyclical_fractional_test.api.evaluate_candidate",
+        fake_evaluate_candidate,
+    )
+    result = run_cyclical_fractional_test(
+        _series(T=60, seed=41),
+        config=CyclicalTestConfig(
+            n_deterministic_cycles=2,
+            d_search_strategy="fixed_grid",
+            d_grid=np.array([0.0, 0.5]),
+            top_k=1,
+            stochastic_cycle_mode="multi_cycle",
+            n_stochastic_cycles=2,
+        ),
+    )
+    assert tuple(cycle.D for cycle in result.best_result.cycles) == target_d
+    assert result.n_candidates_evaluated == 4
+
+
+def test_multi_cycle_adaptive_evaluates_joint_d_candidates(monkeypatch):
+    target_d = (0.25, 0.5)
+
+    def fake_evaluate_candidate(y, X, cycles, config):
+        assert len(cycles) == 2
+        d_values = tuple(cycle.D for cycle in cycles)
+        if d_values == target_d:
+            score = 0.0
+        elif d_values == (0.0, 0.5):
+            score = 1.0
+        else:
+            score = 10.0
+        return GridCandidateResult(
+            cycles=tuple(cycles),
+            error_model=config.error_model,
+            test_value=score,
+            test_star_value=score,
+            xa=score,
+            xaa=1.0,
+            variance_time=1.0,
+            variance_frequency=1.0,
+        )
+
+    monkeypatch.setattr(
+        "cyclical_fractional_test.api.evaluate_candidate",
+        fake_evaluate_candidate,
+    )
+    result = run_cyclical_fractional_test(
+        _series(T=60, seed=41),
+        config=CyclicalTestConfig(
+            n_deterministic_cycles=2,
+            d_search_strategy="adaptive",
+            d_coarse_grid=np.array([0.0, 0.5, 1.0]),
+            d_fine_step=0.25,
+            d_fine_radius=0.25,
+            top_k=1,
+            stochastic_cycle_mode="multi_cycle",
+            n_stochastic_cycles=2,
+        ),
+    )
+    assert tuple(cycle.D for cycle in result.best_result.cycles) == target_d
+    assert result.diagnostics.n_coarse_evaluations == 9
+    assert result.diagnostics.n_fine_evaluations == 5
+    assert result.n_candidates_evaluated == 14
 
 
 # ---------------------------------------------------------------------------
@@ -385,6 +557,51 @@ def test_adaptive_supports_error_models(error_model):
     )
     assert result.best_result.error_model == error_model
     assert np.isfinite(result.best_result.test_value)
+
+
+def test_multi_cycle_adaptive_joint_search_runs():
+    result = run_cyclical_fractional_test(
+        _series(T=70, seed=13),
+        config=CyclicalTestConfig(
+            n_deterministic_cycles=2,
+            d_search_strategy="adaptive",
+            d_coarse_grid=np.array([0.0, 0.5, 1.0]),
+            d_fine_step=0.25,
+            d_fine_radius=0.25,
+            top_k=2,
+            stochastic_cycle_mode="multi_cycle",
+            n_stochastic_cycles=2,
+        ),
+    )
+    diag = result.diagnostics
+    assert len(result.best_result.cycles) == 2
+    assert all(len(candidate.cycles) == 2 for candidate in result.top_k_results)
+    assert diag.n_coarse_evaluations == 3 ** 2
+    assert diag.n_fine_evaluations is not None
+    assert result.n_candidates_evaluated == (
+        diag.n_coarse_evaluations + diag.n_fine_evaluations
+    )
+    assert [cycle.D for cycle in result.best_result.cycles] == diag.final_d_per_r
+    assert len(diag.best_coarse_d_per_r) == 2
+
+
+def test_multi_cycle_fixed_grid_counts_joint_d_product():
+    result = run_cyclical_fractional_test(
+        _series(T=70, seed=13),
+        config=CyclicalTestConfig(
+            n_deterministic_cycles=2,
+            d_search_strategy="fixed_grid",
+            d_grid=np.array([0.0, 0.5, 1.0]),
+            top_k=1,
+            stochastic_cycle_mode="multi_cycle",
+            n_stochastic_cycles=2,
+        ),
+    )
+    diag = result.diagnostics
+    assert len(result.best_result.cycles) == 2
+    assert diag.n_coarse_evaluations is None
+    assert diag.n_fine_evaluations is None
+    assert result.n_candidates_evaluated == 3 ** 2
 
 
 # ---------------------------------------------------------------------------

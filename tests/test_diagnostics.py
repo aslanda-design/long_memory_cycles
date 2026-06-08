@@ -216,7 +216,9 @@ def test_build_test_diagnostics_basic_counters():
         r_peak=3,
         r_candidates=np.array([2, 3, 4]),
         d_grid=np.array([0.0, 0.5]),
-        config=CyclicalTestConfig(stochastic_cycle_mode="single"),
+        config=CyclicalTestConfig(
+            stochastic_cycle_mode="multi_cycle", n_stochastic_cycles=3
+        ),
     )
     assert isinstance(result, TestDiagnostics)
     assert result.n_candidates_evaluated == 10
@@ -225,6 +227,7 @@ def test_build_test_diagnostics_basic_counters():
     assert result.r_peak == 3
     assert result.r_candidates_count == 3
     assert result.d_grid_count == 2
+    assert result.n_stochastic_cycles == 3
 
 
 def test_build_test_diagnostics_no_periodogram_returns_none_summary():

@@ -2,7 +2,7 @@ import numpy as np
 import pytest
 
 from cyclical_fractional_test.config import CyclicalTestConfig
-from cyclical_fractional_test.evaluation import evaluate_candidate
+from cyclical_fractional_test.evaluation import evaluate_candidate, evaluate_r_with_adaptive_d
 from cyclical_fractional_test.exceptions import InvalidConfigurationError, InvalidCycleError
 from cyclical_fractional_test.regression import fit_filtered_regression
 from cyclical_fractional_test.results import GridCandidateResult, StochasticCycle
@@ -35,6 +35,13 @@ def test_key_fields_are_finite():
     assert np.isfinite(result.test_star_value)
     assert np.isfinite(result.xa)
     assert result.xaa > 0.0
+
+
+def test_R_zero_candidate_runs():
+    y, X = _make_y_X()
+    result = evaluate_candidate(y, X, (StochasticCycle(R=0, D=0.3),), _config())
+    assert result.cycles[0].R == 0
+    assert np.isfinite(result.test_value)
 
 
 def test_output_shapes():
@@ -94,6 +101,19 @@ def test_ar_error_model_exposes_estimated_coefficients(error_model, coefficient_
     assert len(result.ar_coefficients) == coefficient_count
 
 
+def test_adaptive_d_search_accepts_R_zero():
+    y, X = _make_y_X(T=30)
+    config = _config(
+        d_coarse_grid=np.array([0.0, 0.5]),
+        d_fine_step=0.25,
+        d_fine_radius=0.25,
+    )
+    result = evaluate_r_with_adaptive_d(y, X, R=0, config=config)
+    assert result.R == 0
+    assert result.best_result.cycles[0].R == 0
+    assert np.isfinite(result.best_result.test_value)
+
+
 # ---------------------------------------------------------------------------
 # Mode dispatch guards
 # ---------------------------------------------------------------------------
@@ -109,13 +129,14 @@ def test_single_mode_rejects_wrong_cycle_count():
         )
 
 
-def test_multi_cycle_mode_not_implemented():
+def test_multi_cycle_mode_runs_with_joint_cycle_tuple():
     y, X = _make_y_X()
     config = CyclicalTestConfig(stochastic_cycle_mode="multi_cycle")
-    with pytest.raises(NotImplementedError):
-        evaluate_candidate(
-            y, X, [StochasticCycle(R=1, D=0.3), StochasticCycle(R=2, D=0.2)], config
-        )
+    result = evaluate_candidate(
+        y, X, [StochasticCycle(R=1, D=0.3), StochasticCycle(R=2, D=0.2)], config
+    )
+    assert len(result.cycles) == 2
+    assert np.isfinite(result.test_value)
 
 
 # ---------------------------------------------------------------------------

@@ -68,7 +68,8 @@ def compute_psi_single_cycle(
     """Compute ψ(λ_j, R) = log(|2(cos(λ_j) - cos(λ_R))|) for j = 0, ..., T-1.
 
     The expression is singular at j = R and at its mirrored frequency T-R.
-    When drop_singular_frequency=True, both positions are set to 0.0.
+    For R=0, the only in-array singularity is j=0.
+    When drop_singular_frequency=True, singular positions are set to 0.0.
     """
     _validate_psi_single_cycle(T, R, drop_singular_frequency)
     j = np.arange(T, dtype=float)
@@ -79,7 +80,7 @@ def compute_psi_single_cycle(
     if drop_singular_frequency:
         psi[R] = 0.0
         mirror = T - R
-        if mirror != R:
+        if 0 <= mirror < T and mirror != R:
             psi[mirror] = 0.0
     return psi
 
@@ -89,11 +90,32 @@ def compute_psi_multi_cycle(
     cycles: object,
     drop_singular_frequency: bool = True,
 ) -> np.ndarray:
-    """Reserved for the multi-cycle ψ case."""
-    raise NotImplementedError(
-        "Multi-cycle psi computation is not implemented yet. "
-        "Use stochastic_cycle_mode='single' for the current release."
-    )
+    """Compute ψ_multi(λ_j) = Σ_q log(|2(cos(λ_j) - cos(λ_Rq))|).
+
+    When drop_singular_frequency=True, ψ_multi[j] is set to 0.0 at every
+    in-array singular index j in {R_q, T-R_q}; for R_q=0 this is only j=0.
+    """
+    try:
+        cycle_list = tuple(cycles)
+    except TypeError as exc:
+        raise InvalidConfigurationError(
+            f"cycles must be iterable, got {type(cycles).__name__}."
+        ) from exc
+    _validate_psi_multi_cycle(T, cycle_list, drop_singular_frequency)
+    psi_multi = np.zeros(T, dtype=float)
+    singular_indices: set[int] = set()
+    for cycle in cycle_list:
+        psi_multi += compute_psi_single_cycle(
+            T, cycle.R, drop_singular_frequency=False
+        )
+        singular_indices.add(cycle.R)
+        mirror = T - cycle.R
+        if 0 <= mirror < T:
+            singular_indices.add(mirror)
+    if drop_singular_frequency:
+        for idx in singular_indices:
+            psi_multi[idx] = 0.0
+    return psi_multi
 
 
 def compute_xaa_single_cycle(psi: np.ndarray) -> float:
@@ -104,11 +126,10 @@ def compute_xaa_single_cycle(psi: np.ndarray) -> float:
 
 
 def compute_xaa_multi_cycle(psi_multi: np.ndarray) -> float:
-    """Reserved for the multi-cycle XAA case."""
-    raise NotImplementedError(
-        "Multi-cycle XAA computation is not implemented yet. "
-        "Use stochastic_cycle_mode='single' for the current release."
-    )
+    """Compute XAA_multi = (2/T) * Σ_j ψ_multi(λ_j)^2.  T = len(psi_multi)."""
+    _validate_xaa_single_cycle(psi_multi)
+    T = len(psi_multi)
+    return float((2.0 / T) * np.sum(psi_multi ** 2))
 
 
 def compute_ar_spectral_adjustment(
@@ -167,7 +188,7 @@ def compute_xaa_ar1_single_cycle(
     lambdas: np.ndarray,
     ar_coefficients: np.ndarray,
 ) -> float:
-    """Compute the AR(1)-adjusted XAA for one stochastic cycle."""
+    """Compute XAA_AR1 = (2/T)[Σψ² - (Σψ epsilon)² / Σεpsilon²]."""
     _validate_compute_xaa_ar1_single_cycle(psi, lambdas, ar_coefficients)
     psi_arr = np.asarray(psi, dtype=float)
     lambdas_arr = np.asarray(lambdas, dtype=float)
@@ -188,11 +209,8 @@ def compute_xaa_ar1_multi_cycle(
     lambdas: np.ndarray,
     ar_coefficients: np.ndarray,
 ) -> float:
-    """Reserved for AR(1)-adjusted multi-cycle XAA."""
-    raise NotImplementedError(
-        "Multi-cycle AR(1) XAA computation is not implemented yet. "
-        "Use stochastic_cycle_mode='single' for the current release."
-    )
+    """Compute XAA_AR1,multi = (2/T)[Σψ_multi² - (Σψ_multi epsilon)² / Σεpsilon²]."""
+    return compute_xaa_ar1_single_cycle(psi_multi, lambdas, ar_coefficients)
 
 
 def compute_xaa_ar1_dynamic(
@@ -216,7 +234,7 @@ def compute_xaa_ar2_single_cycle(
     lambdas: np.ndarray,
     ar_coefficients: np.ndarray,
 ) -> float:
-    """Compute the AR(2)-adjusted XAA for one stochastic cycle."""
+    """Compute XAA_AR2 = (2/T)[Σψ² - S_ψε' inv(S_εε) S_ψε]."""
     _validate_compute_xaa_ar2_single_cycle(psi, lambdas, ar_coefficients)
     psi_arr = np.asarray(psi, dtype=float)
     lambdas_arr = np.asarray(lambdas, dtype=float)
@@ -259,11 +277,8 @@ def compute_xaa_ar2_multi_cycle(
     lambdas: np.ndarray,
     ar_coefficients: np.ndarray,
 ) -> float:
-    """Reserved for AR(2)-adjusted multi-cycle XAA."""
-    raise NotImplementedError(
-        "Multi-cycle AR(2) XAA computation is not implemented yet. "
-        "Use stochastic_cycle_mode='single' for the current release."
-    )
+    """Compute XAA_AR2,multi = (2/T)[Σψ_multi² - S_ψε' inv(S_εε) S_ψε]."""
+    return compute_xaa_ar2_single_cycle(psi_multi, lambdas, ar_coefficients)
 
 
 def compute_xaa_ar2_dynamic(
@@ -363,14 +378,10 @@ def compute_xa_multi_cycle(
     psi_multi: np.ndarray,
     residual_periodogram: np.ndarray,
 ) -> float:
-    """Reserved for the multi-cycle XA case.
-
-    Tracks compute_psi_multi_cycle, which is still a placeholder.
-    """
-    raise NotImplementedError(
-        "Multi-cycle XA computation is not implemented yet. "
-        "Use stochastic_cycle_mode='single' for the current release."
-    )
+    """Compute XA_multi = -(2π/T) * Σ_j ψ_multi(λ_j) * I_residuals(λ_j)."""
+    _validate_compute_xa_single_cycle(psi_multi, residual_periodogram)
+    T = len(psi_multi)
+    return float(-(2.0 * np.pi / T) * np.sum(psi_multi * residual_periodogram))
 
 
 def compute_xa_ar_adjusted(
@@ -378,7 +389,7 @@ def compute_xa_ar_adjusted(
     residual_periodogram: np.ndarray,
     ar_spectral_adjustment: np.ndarray,
 ) -> float:
-    """Compute XA after removing the estimated AR spectral shape."""
+    """Compute XA_AR = -(2π/T) * Σ_j ψ(λ_j) I_residuals(λ_j) / g(λ_j)."""
     _validate_compute_xa_ar_adjusted(
         psi, residual_periodogram, ar_spectral_adjustment
     )
@@ -432,7 +443,7 @@ def compute_xa_ar1_single_cycle(
     residual_periodogram: np.ndarray,
     ar_spectral_adjustment: np.ndarray,
 ) -> float:
-    """Compute the AR(1)-adjusted XA for one stochastic cycle."""
+    """Compute XA_AR1 = -(2π/T) * Σ_j ψ(λ_j) I_residuals(λ_j) / g_AR1(λ_j)."""
     _validate_compute_xa_ar1_single_cycle(
         psi, residual_periodogram, ar_spectral_adjustment
     )
@@ -446,10 +457,9 @@ def compute_xa_ar1_multi_cycle(
     residual_periodogram: np.ndarray,
     ar_spectral_adjustment: np.ndarray,
 ) -> float:
-    """Reserved for AR(1)-adjusted multi-cycle XA."""
-    raise NotImplementedError(
-        "Multi-cycle AR(1) XA computation is not implemented yet. "
-        "Use stochastic_cycle_mode='single' for the current release."
+    """Compute XA_AR1,multi = -(2π/T) * Σ_j ψ_multi(λ_j) I_residuals(λ_j) / g_AR1(λ_j)."""
+    return compute_xa_ar1_single_cycle(
+        psi_multi, residual_periodogram, ar_spectral_adjustment
     )
 
 
@@ -478,7 +488,7 @@ def compute_xa_ar2_single_cycle(
     residual_periodogram: np.ndarray,
     ar_spectral_adjustment: np.ndarray,
 ) -> float:
-    """Compute the AR(2)-adjusted XA for one stochastic cycle."""
+    """Compute XA_AR2 = -(2π/T) * Σ_j ψ(λ_j) I_residuals(λ_j) / g_AR2(λ_j)."""
     _validate_compute_xa_ar2_single_cycle(
         psi, residual_periodogram, ar_spectral_adjustment
     )
@@ -492,10 +502,9 @@ def compute_xa_ar2_multi_cycle(
     residual_periodogram: np.ndarray,
     ar_spectral_adjustment: np.ndarray,
 ) -> float:
-    """Reserved for AR(2)-adjusted multi-cycle XA."""
-    raise NotImplementedError(
-        "Multi-cycle AR(2) XA computation is not implemented yet. "
-        "Use stochastic_cycle_mode='single' for the current release."
+    """Compute XA_AR2,multi = -(2π/T) * Σ_j ψ_multi(λ_j) I_residuals(λ_j) / g_AR2(λ_j)."""
+    return compute_xa_ar2_single_cycle(
+        psi_multi, residual_periodogram, ar_spectral_adjustment
     )
 
 
@@ -629,15 +638,39 @@ def _validate_psi_single_cycle(T: int, R: int, drop_singular_frequency: bool) ->
         raise InvalidConfigurationError(f"T must be >= 2, got {T}.")
     if isinstance(R, bool) or not isinstance(R, int):
         raise InvalidConfigurationError(f"R must be an int, got {type(R).__name__}.")
-    if R < 1 or R > T - 1:
+    if R < 0 or R > T - 1:
         raise InvalidConfigurationError(
-            f"R must satisfy 1 <= R <= T-1={T - 1}, got R={R}."
+            f"R must satisfy 0 <= R <= T-1={T - 1}, got R={R}."
         )
     if not isinstance(drop_singular_frequency, bool):
         raise InvalidConfigurationError(
             f"drop_singular_frequency must be a bool, "
             f"got {type(drop_singular_frequency).__name__}."
         )
+
+
+def _validate_psi_multi_cycle(
+    T: int, cycles: object, drop_singular_frequency: bool
+) -> None:
+    if isinstance(T, bool) or not isinstance(T, int):
+        raise InvalidConfigurationError(f"T must be an int, got {type(T).__name__}.")
+    if T < 2:
+        raise InvalidConfigurationError(f"T must be >= 2, got {T}.")
+    if not isinstance(drop_singular_frequency, bool):
+        raise InvalidConfigurationError(
+            f"drop_singular_frequency must be a bool, "
+            f"got {type(drop_singular_frequency).__name__}."
+        )
+    try:
+        cycle_list = list(cycles)
+    except TypeError as exc:
+        raise InvalidConfigurationError(
+            f"cycles must be iterable, got {type(cycles).__name__}."
+        ) from exc
+    if len(cycle_list) == 0:
+        raise InvalidCycleError("cycles must not be empty.")
+    for cycle in cycle_list:
+        _validate_psi_single_cycle(T, cycle.R, drop_singular_frequency)
 
 
 def _validate_xaa_single_cycle(psi: Any) -> None:

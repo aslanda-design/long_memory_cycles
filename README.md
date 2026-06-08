@@ -7,11 +7,11 @@ A Python package implementing a statistical test for **fractional cyclic long me
 Given a time series Y(t), t=1,...,T, this package tests for the presence of fractional cyclic integration at candidate frequency R with fractional parameter D. The test combines:
 
 - A deterministic basis of Chebyshev polynomials P_1(t),...,P_m(t).
-- A stochastic fractional cyclic filter `(1 - 2cos(2πR/T)L + L²)^D`.
+- One or more stochastic fractional cyclic filters `(1 - 2cos(2πR/T)L + L²)^D`.
 - A residual error specification: white noise (default), AR(1), or AR(2).
 - A search over (R, D) candidates, returning the top-k combinations whose test statistic is closest to zero. By default the search over D is **adaptive** (a coarse grid refined locally around the best coarse value); a fixed grid is still available.
 
-## Current status: Waves 0–16 complete (+ adaptive D search)
+## Current status: Waves 0–17 complete (+ adaptive D search)
 
 | Wave | Content | Status |
 |------|---------|--------|
@@ -33,7 +33,7 @@ Given a time series Y(t), t=1,...,T, this package tests for the presence of frac
 | 15 | Mathematical documentation: background, mapping, data-flow diagram, implementation notes | ✅ |
 | 16 | White-noise, AR(1), and AR(2) residual error specifications | ✅ |
 | — | Adaptive coarse-to-fine D search (default; `d_search_strategy`) | ✅ |
-| 17+ | Multi-cycle full support (psi_multi, xa_multi, xaa_multi) | 🔜 |
+| 17 | Multi-cycle support with aggregate ψ, XAA, XA, and AR-adjusted variants | ✅ |
 
 ### Adaptive D search (default)
 
@@ -44,7 +44,7 @@ The statistical test is unchanged — only how candidate `D` values are chosen. 
 3. Evaluate a local fine grid around it (default step `0.01`, radius `0.09`, e.g. best `0.3` → `0.21…0.39`, clipped to `[0,1]`).
 4. Keep the best `D` from both stages for that `R`.
 
-Because the statistic is asymptotically normal for fixed `R`, the objective in `D` is locally well-behaved, so this two-stage search approximates a dense grid at much lower cost. Set `d_search_strategy="fixed_grid"` (with `d_grid`) to recover the original Cartesian-grid behavior; in adaptive mode `d_grid` is ignored.
+Because the statistic is asymptotically normal for fixed `R`, the objective in `D` is locally well-behaved, so this two-stage search approximates a dense grid at much lower cost. Set `d_search_strategy="fixed_grid"` (with `d_grid`) to recover the original Cartesian-grid behavior; in adaptive mode `d_grid` is ignored. In `stochastic_cycle_mode="multi_cycle"`, adaptive search evaluates the coarse Cartesian product of the selected cycles' D values, then refines the best joint D vector locally.
 
 ## Documentation
 
@@ -76,6 +76,7 @@ from cyclical_fractional_test import (
     build_chebyshev_design,
     compute_document_periodogram,
     find_periodogram_peak,
+    find_top_periodogram_peaks,
     build_r_grid_around_peak,
     build_d_grid,
     build_default_d_coarse_grid,
@@ -83,9 +84,12 @@ from cyclical_fractional_test import (
     build_d_grid_for_strategy,
     candidate_iterator,
     compute_psi_single_cycle,
+    compute_psi_multi_cycle,
     compute_xaa_single_cycle,
+    compute_xaa_multi_cycle,
     compute_mu,
     compute_fractional_coefficients_single_cycle,
+    compute_fractional_coefficients_multi_cycle,
     filter_response_and_design,
     fit_filtered_regression,
     estimate_ar_ols,
@@ -94,6 +98,7 @@ from cyclical_fractional_test import (
     compute_time_variance,
     compute_frequency_variance_dynamic,
     compute_xa_single_cycle,
+    compute_xa_multi_cycle,
     compute_xa_ar1_single_cycle,
     compute_xa_ar2_single_cycle,
     compute_xa_error_model,
@@ -118,10 +123,15 @@ X = build_chebyshev_design(T, config.n_deterministic_cycles)        # (200, 4)
 
 # Periodogram and peak
 _, periodogram = compute_document_periodogram(y)
-r_peak = find_periodogram_peak(periodogram)                         # int
+r_peak = find_periodogram_peak(periodogram)                         # int; skips R=0 by default
 
 # Candidate grids
-r_grid = build_r_grid_around_peak(r_peak, config.r_window, T)
+r_grid = build_r_grid_around_peak(
+    r_peak,
+    config.r_window,
+    T,
+    include_zero=not config.exclude_zero_frequency,
+)
 d_grid = build_d_grid(config.d_grid)
 candidates = candidate_iterator(r_grid, d_grid)                     # list of (StochasticCycle,)
 
@@ -187,6 +197,33 @@ print(result.best_result.test_value)
 print(result.best_result.ar_coefficients)  # estimated AR nuisance parameters
 print(result.top_k_results)         # top-3 candidates (one per frequency R)
 
+# Include zero frequency explicitly when desired. R=0 is not oscillatory; it
+# represents the zero-frequency component and uses the same statistic.
+zero_frequency = run_cyclical_fractional_test(
+    y,
+    config=CyclicalTestConfig(
+        n_deterministic_cycles=4,
+        exclude_zero_frequency=False,
+    ),
+)
+print(zero_frequency.r_candidates)   # may include 0
+
+# Multi-cycle mode: choose the top k periodogram peaks, then search joint D
+# tuples for those simultaneous cycles.
+multi = run_cyclical_fractional_test(
+    y,
+    config=CyclicalTestConfig(
+        n_deterministic_cycles=4,
+        d_search_strategy="adaptive",
+        d_coarse_grid=np.array([0.0, 0.25, 0.5, 0.75, 1.0]),
+        stochastic_cycle_mode="multi_cycle",
+        n_stochastic_cycles=3,
+        error_model="ar1",
+    ),
+)
+print(multi.r_candidates)           # top periodogram peak indices, strongest first
+print(multi.best_result.cycles)     # ((R_1,D_1), (R_2,D_2), (R_3,D_3))
+
 # Recover the original fixed-grid behavior explicitly
 fixed = run_cyclical_fractional_test(
     y,
@@ -207,8 +244,8 @@ print(diag.periodogram_summary.peak_value)  # periodogram value at R*
 
 `compute_xaa_error_model` and `compute_xa_error_model` dispatch independently
 over `error_model` and `stochastic_cycle_mode`. The AR(1)/AR(2) multi-cycle
-routes are represented explicitly, but still raise `NotImplementedError`
-until the pending multi-cycle ψ, XAA, and XA mathematics is implemented.
+routes use the same projection formulas as the single-cycle paths, replacing
+the single-cycle ψ array with the aggregate multi-cycle ψ array.
 
 ## Package structure
 

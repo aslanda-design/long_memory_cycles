@@ -8,7 +8,7 @@ from .exceptions import InvalidConfigurationError, InvalidCycleError
 
 
 def compute_mu(T: int, R: int) -> float:
-    """Compute mu = cos(2πR/T), the cyclic frequency cosine."""
+    """Compute mu = cos(2πR/T), the frequency cosine."""
     _validate_compute_mu(T, R)
     return float(np.cos(2.0 * np.pi * R / T))
 
@@ -42,10 +42,26 @@ def compute_fractional_coefficients_multi_cycle(
     T: int,
     cycles: object,
 ) -> np.ndarray:
-    """Reserved for the multi-cycle fractional filter coefficients; raises NotImplementedError."""
-    raise NotImplementedError(
-        "Multi-cycle fractional coefficients are not implemented yet."
-    )
+    """Compute coefficients of Π_q (1 - 2 mu_q L + L²)^Dq.
+
+    The combined coefficients are the truncated convolution of the single-cycle
+    coefficient arrays, keeping C_0, ..., C_{T-1}.
+    """
+    try:
+        cycles_t = tuple(cycles)
+    except TypeError as exc:
+        raise InvalidConfigurationError(
+            f"cycles must be iterable, got {type(cycles).__name__}."
+        ) from exc
+    _validate_compute_fractional_coefficients_multi_cycle(T, cycles_t)
+    combined = np.zeros(T, dtype=float)
+    combined[0] = 1.0
+    for cycle in cycles_t:
+        cycle_coeffs = compute_fractional_coefficients_single_cycle(
+            T, cycle.R, cycle.D
+        )
+        combined = np.convolve(combined, cycle_coeffs, mode="full")[:T]
+    return combined
 
 
 def compute_fractional_coefficients_dynamic(
@@ -156,9 +172,9 @@ def _validate_compute_mu(T: int, R: int) -> None:
         raise InvalidConfigurationError(f"T must be >= 2, got {T}.")
     if isinstance(R, bool) or not isinstance(R, int):
         raise InvalidConfigurationError(f"R must be an int, got {type(R).__name__}.")
-    if R < 1 or R >= T:
+    if R < 0 or R >= T:
         raise InvalidConfigurationError(
-            f"R must satisfy 1 <= R < T={T}, got R={R}."
+            f"R must satisfy 0 <= R < T={T}, got R={R}."
         )
 
 
@@ -171,9 +187,9 @@ def _validate_compute_fractional_coefficients_single_cycle(
         raise InvalidConfigurationError(f"T must be >= 2, got {T}.")
     if isinstance(R, bool) or not isinstance(R, int):
         raise InvalidConfigurationError(f"R must be an int, got {type(R).__name__}.")
-    if R < 1 or R >= T:
+    if R < 0 or R >= T:
         raise InvalidConfigurationError(
-            f"R must satisfy 1 <= R < T={T}, got R={R}."
+            f"R must satisfy 0 <= R < T={T}, got R={R}."
         )
     if isinstance(D, bool):
         raise InvalidConfigurationError("D must not be a bool.")
@@ -183,6 +199,27 @@ def _validate_compute_fractional_coefficients_single_cycle(
         raise InvalidConfigurationError(f"D must be a numeric value: {exc}") from exc
     if not np.isfinite(D_val):
         raise InvalidConfigurationError(f"D must be finite, got {D}.")
+
+
+def _validate_compute_fractional_coefficients_multi_cycle(
+    T: int, cycles: object
+) -> None:
+    if isinstance(T, bool) or not isinstance(T, int):
+        raise InvalidConfigurationError(f"T must be an int, got {type(T).__name__}.")
+    if T < 2:
+        raise InvalidConfigurationError(f"T must be >= 2, got {T}.")
+    try:
+        cycle_list = list(cycles)
+    except TypeError as exc:
+        raise InvalidConfigurationError(
+            f"cycles must be iterable, got {type(cycles).__name__}."
+        ) from exc
+    if len(cycle_list) == 0:
+        raise InvalidConfigurationError("cycles must not be empty.")
+    for cycle in cycle_list:
+        _validate_compute_fractional_coefficients_single_cycle(
+            T, cycle.R, cycle.D
+        )
 
 
 def _validate_compute_fractional_coefficients_dynamic(

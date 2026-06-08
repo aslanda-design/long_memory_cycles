@@ -9,6 +9,7 @@ from cyclical_fractional_test.grid import (
     build_d_grid_for_strategy,
     build_default_d_coarse_grid,
     build_multi_cycle_candidate_grid,
+    build_multi_cycle_candidate_grid_from_d_grids,
     build_r_grid_around_peak,
     build_single_cycle_candidate_grid,
     candidate_iterator,
@@ -47,6 +48,13 @@ def test_build_r_grid_clips_both_bounds():
     result = build_r_grid_around_peak(r_peak=1, r_window=5, T=4)
     # r_min = max(1, -4) = 1; r_max = min(3, 6) = 3
     np.testing.assert_array_equal(result, np.array([1, 2, 3]))
+
+
+def test_build_r_grid_can_include_zero_when_requested():
+    result = build_r_grid_around_peak(
+        r_peak=0, r_window=2, T=10, include_zero=True
+    )
+    np.testing.assert_array_equal(result, np.array([0, 1, 2]))
 
 
 # ---------------------------------------------------------------------------
@@ -184,9 +192,46 @@ def test_build_single_cycle_candidate_grid_cartesian_order():
 # ---------------------------------------------------------------------------
 
 
-def test_build_multi_cycle_candidate_grid_raises_not_implemented():
-    with pytest.raises(NotImplementedError):
-        build_multi_cycle_candidate_grid()
+def test_build_multi_cycle_candidate_grid_builds_joint_d_product():
+    r_grid = np.array([2, 5])
+    d_grid = np.array([0.0, 0.5])
+    candidates = build_multi_cycle_candidate_grid(r_grid, d_grid)
+    assert len(candidates) == 4
+    assert candidates == [
+        (StochasticCycle(R=2, D=0.0), StochasticCycle(R=5, D=0.0)),
+        (StochasticCycle(R=2, D=0.0), StochasticCycle(R=5, D=0.5)),
+        (StochasticCycle(R=2, D=0.5), StochasticCycle(R=5, D=0.0)),
+        (StochasticCycle(R=2, D=0.5), StochasticCycle(R=5, D=0.5)),
+    ]
+
+
+def test_build_multi_cycle_candidate_grid_from_d_grids_builds_joint_product():
+    r_grid = np.array([2, 5])
+    d_grids = [np.array([0.0, 0.5]), np.array([0.25, 0.75])]
+    candidates = build_multi_cycle_candidate_grid_from_d_grids(r_grid, d_grids)
+    assert len(candidates) == 4
+    assert candidates == [
+        (StochasticCycle(R=2, D=0.0), StochasticCycle(R=5, D=0.25)),
+        (StochasticCycle(R=2, D=0.0), StochasticCycle(R=5, D=0.75)),
+        (StochasticCycle(R=2, D=0.5), StochasticCycle(R=5, D=0.25)),
+        (StochasticCycle(R=2, D=0.5), StochasticCycle(R=5, D=0.75)),
+    ]
+
+
+@pytest.mark.parametrize(
+    "r_grid,d_grids",
+    [
+        (np.array([2, 5]), [np.array([0.0])]),
+        (np.array([2, 5]), None),
+        (np.array([2, 5]), [np.array([]), np.array([0.0])]),
+        (np.array([2, 5]), [np.array([0.0]), np.array([1.5])]),
+    ],
+)
+def test_build_multi_cycle_candidate_grid_from_d_grids_rejects_invalid(
+    r_grid, d_grids
+):
+    with pytest.raises(InvalidConfigurationError):
+        build_multi_cycle_candidate_grid_from_d_grids(r_grid, d_grids)
 
 
 # ---------------------------------------------------------------------------
@@ -213,11 +258,14 @@ def test_candidate_iterator_multi_peak_single_cycle_mode():
     assert len(candidates) == 4
 
 
-def test_candidate_iterator_multi_cycle_placeholder():
-    r_grid = np.array([10])
-    d_grid = np.array([0.5])
-    with pytest.raises(NotImplementedError):
-        candidate_iterator(r_grid, d_grid, stochastic_cycle_mode="multi_cycle")
+def test_candidate_iterator_multi_cycle_mode():
+    r_grid = np.array([10, 12])
+    d_grid = np.array([0.0, 0.5])
+    candidates = candidate_iterator(
+        r_grid, d_grid, stochastic_cycle_mode="multi_cycle"
+    )
+    assert len(candidates) == 4
+    assert all(len(candidate) == 2 for candidate in candidates)
 
 
 def test_candidate_iterator_rejects_invalid_mode():
@@ -260,6 +308,11 @@ def test_build_r_grid_rejects_T_less_than_2():
 def test_build_r_grid_rejects_float_T():
     with pytest.raises(InvalidConfigurationError):
         build_r_grid_around_peak(r_peak=25, r_window=5, T=100.0)  # type: ignore
+
+
+def test_build_r_grid_rejects_non_boolean_include_zero():
+    with pytest.raises(InvalidConfigurationError):
+        build_r_grid_around_peak(r_peak=0, r_window=1, T=10, include_zero=1)  # type: ignore
 
 
 # ---------------------------------------------------------------------------

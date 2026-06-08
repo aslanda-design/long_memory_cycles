@@ -19,6 +19,7 @@ from cyclical_fractional_test.validation import (
     validate_d_grid,
     validate_mode,
     validate_n_deterministic_cycles,
+    validate_n_stochastic_cycles,
     validate_r_window,
     validate_series,
     validate_top_k,
@@ -101,6 +102,26 @@ def test_validate_n_deterministic_cycles_rejects_negative():
 def test_validate_n_deterministic_cycles_rejects_float():
     with pytest.raises(InvalidConfigurationError):
         validate_n_deterministic_cycles(4.5)
+
+
+# ---------------------------------------------------------------------------
+# validate_n_stochastic_cycles
+# ---------------------------------------------------------------------------
+
+
+def test_validate_n_stochastic_cycles_accepts_positive_integer():
+    assert validate_n_stochastic_cycles(2) == 2
+
+
+@pytest.mark.parametrize("bad_n", [0, -1, 1.5, True])
+def test_validate_n_stochastic_cycles_rejects_invalid_values(bad_n):
+    with pytest.raises(InvalidConfigurationError):
+        validate_n_stochastic_cycles(bad_n)
+
+
+def test_validate_config_rejects_bad_n_stochastic_cycles():
+    with pytest.raises(InvalidConfigurationError):
+        validate_config(CyclicalTestConfig(n_stochastic_cycles=0))
 
 
 # ---------------------------------------------------------------------------
@@ -338,14 +359,19 @@ def test_validate_cycle_accepts_valid_cycle():
     assert validate_cycle(c) is c
 
 
+def test_validate_cycle_accepts_zero_R():
+    c = StochasticCycle(R=0, D=0.4)
+    assert validate_cycle(c) is c
+
+
 def test_validate_cycle_rejects_non_integer_R():
     c = StochasticCycle(R=25.5, D=0.4)  # type: ignore
     with pytest.raises(InvalidCycleError):
         validate_cycle(c)
 
 
-def test_validate_cycle_rejects_non_positive_R():
-    c = StochasticCycle(R=0, D=0.4)
+def test_validate_cycle_rejects_negative_R():
+    c = StochasticCycle(R=-1, D=0.4)
     with pytest.raises(InvalidCycleError):
         validate_cycle(c)
 
@@ -395,4 +421,3 @@ def test_validate_cycles_accepts_multi_cycle_when_allowed():
     cycles = [StochasticCycle(R=25, D=0.4), StochasticCycle(R=30, D=0.2)]
     result = validate_cycles(cycles, allow_multi_cycle=True)
     assert len(result) == 2
-

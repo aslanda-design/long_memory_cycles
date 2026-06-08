@@ -22,6 +22,7 @@ class CyclicalTestConfig:
     variance_mode: str = "time"  # Variance estimator: "time", "frequency", or "both".
     statistic_mode: str = "test"  # Statistic formula: "test" or "test_star".
     stochastic_cycle_mode: str = "single"  # Cycle search mode used by the grid.
+    n_stochastic_cycles: int = 1  # Number of periodogram peaks used when stochastic_cycle_mode="multi_cycle".
     error_model: str = "white_noise"  # Residual error specification: white noise, AR(1), or AR(2).
     drop_singular_frequency: bool = True  # Drop j=R where psi is singular.
     exclude_zero_frequency: bool = True  # Ignore zero frequency when locating R*.
