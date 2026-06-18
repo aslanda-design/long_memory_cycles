@@ -11,7 +11,7 @@ Given a time series Y(t), t=1,...,T, this package tests for the presence of frac
 - A residual error specification: white noise (default), AR(1), or AR(2).
 - A search over (R, D) candidates, returning the top-k combinations whose test statistic is closest to zero. By default the search over D is **adaptive** (a coarse grid refined locally around the best coarse value); a fixed grid is still available.
 
-## Current status: Waves 0–17 complete (+ adaptive D search)
+## Current status: Waves 0–18 complete (+ adaptive D search)
 
 | Wave | Content | Status |
 |------|---------|--------|
@@ -34,6 +34,7 @@ Given a time series Y(t), t=1,...,T, this package tests for the presence of frac
 | 16 | White-noise, AR(1), and AR(2) residual error specifications | ✅ |
 | — | Adaptive coarse-to-fine D search (default; `d_search_strategy`) | ✅ |
 | 17 | Multi-cycle support with aggregate ψ, XAA, XA, and AR-adjusted variants | ✅ |
+| 18 | Scikit-learn-style `CyclicalFractionalModel` (`fit`/`predict`/`predict_interval`) with in-sample reconstruction and out-of-sample forecast | ✅ |
 
 ### Adaptive D search (default)
 
@@ -240,6 +241,19 @@ print(diag.best_coarse_d_per_r)             # best coarse D for each R
 print(diag.final_d_per_r)                   # refined D for each R
 print(diag.r_peak)                          # dominant frequency index
 print(diag.periodogram_summary.peak_value)  # periodogram value at R*
+
+# Scikit-learn-style model (Wave 18): fit once, then predict / forecast
+from cyclical_fractional_test import CyclicalFractionalModel
+
+model = CyclicalFractionalModel(n_deterministic_cycles=4, error_model="ar1").fit(y)
+print(model.R_, model.D_)                    # selected frequency and fractional order
+print(model.ar_coefficients_)                # AR error coefficients reused for forecasting
+print(model.innovation_variance_)            # σ̂² of the AR innovations
+
+T = len(y)
+in_sample = model.predict(T)                 # one-step-ahead reconstruction, t = 1..T
+forecast = model.predict(T + 20)             # reconstruction + 20-step forecast
+lower, upper = model.predict_interval(T + 20, alpha=0.05)  # 95% prediction bounds
 ```
 
 `compute_xaa_error_model` and `compute_xa_error_model` dispatch independently
@@ -253,6 +267,8 @@ the single-cycle ψ array with the aggregate multi-cycle ψ array.
 src/cyclical_fractional_test/
 ├── __init__.py       # public API exports
 ├── api.py            # run_cyclical_fractional_test entry point
+├── model.py          # CyclicalFractionalModel (fit/predict)     [Wave 18]
+├── prediction.py     # in-sample reconstruction, forecast, MA weights [Wave 18]
 ├── config.py         # CyclicalTestConfig dataclass
 ├── results.py        # StochasticCycle, GridCandidateResult, AdaptiveDSearchResult, CyclicalFractionalTestResult
 ├── exceptions.py     # CyclicalFractionalTestError hierarchy
@@ -261,7 +277,7 @@ src/cyclical_fractional_test/
 ├── spectral.py       # periodogram, ψ, XAA, VAR*, XA, AR adjustments [Waves 3, 5, 9, 10 & 16]
 ├── grid.py           # R/D grids, candidate iterator, adaptive coarse/fine D grids [Wave 4 +]
 ├── filters.py        # mu, coefficients, filter application     [Waves 6 & 7]
-├── regression.py     # OLS regression, residuals, VAR, AR OLS  [Waves 8 & 16]
+├── regression.py     # OLS regression, residuals, VAR, AR OLS, innovation variance [Waves 8, 16 & 18]
 ├── scoring.py        # TEST / TEST* statistics, TopKSelector    [Wave 11]
 ├── evaluation.py     # evaluate_candidate, evaluate_r_with_adaptive_d [Wave 12 +]
 └── diagnostics.py    # TestDiagnostics, PeriodogramSummary, VarianceComparison [Wave 14]

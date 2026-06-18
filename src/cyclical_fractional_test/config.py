@@ -10,7 +10,7 @@ import numpy as np
 class CyclicalTestConfig:
     """Configuration shared by the pieces of the cyclical test."""
 
-    n_deterministic_cycles: int = 4  # Number m of Chebyshev terms P_1(t), ..., P_m(t).
+    n_deterministic_cycles: int = 4  # Number m of Chebyshev terms P_1(t), ..., P_m(t); 0 means none.
     include_intercept: bool = False  # Include P_0(t)=1 in the regression.
     d_grid: Optional[np.ndarray] = field(default=None)  # Fixed-grid D values; only used when d_search_strategy="fixed_grid".
     d_search_strategy: str = "adaptive"  # "adaptive" coarse-to-fine search or "fixed_grid".

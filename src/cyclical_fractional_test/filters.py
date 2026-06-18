@@ -13,29 +13,42 @@ def compute_mu(T: int, R: int) -> float:
     return float(np.cos(2.0 * np.pi * R / T))
 
 
-def compute_fractional_coefficients_single_cycle(
-    T: int,
-    R: int,
+def compute_fractional_coefficients_from_mu(
+    mu: float,
     D: float,
+    length: int,
 ) -> np.ndarray:
-    """Compute coefficients C_{j,D}(mu) of (1 - 2 mu L + L^2)^D for j = 0, ..., T-1.
+    """Compute the first `length` coefficients C_{j,D}(mu) of (1 - 2 mu L + L^2)^D.
 
     C_0 = 1,  C_1 = -2 D mu,
     C_j = [2 mu (j - 1 - D) C_{j-1} + (2D - j + 2) C_{j-2}] / j  for j >= 2.
+
+    The recursion depends on the frequency only through mu, so `length` can exceed
+    the training length — used to extend the filter for out-of-sample prediction.
     """
-    _validate_compute_fractional_coefficients_single_cycle(T, R, D)
-    mu = compute_mu(T, R)
-    coeffs = np.zeros(T, dtype=float)
+    _validate_compute_fractional_coefficients_from_mu(mu, D, length)
+    coeffs = np.zeros(length, dtype=float)
     coeffs[0] = 1.0
-    if T == 1:
+    if length == 1:
         return coeffs
     coeffs[1] = -2.0 * D * mu
-    for j in range(2, T):
+    for j in range(2, length):
         coeffs[j] = (
             2.0 * mu * (j - 1 - D) * coeffs[j - 1]
             + (2.0 * D - j + 2) * coeffs[j - 2]
         ) / j
     return coeffs
+
+
+def compute_fractional_coefficients_single_cycle(
+    T: int,
+    R: int,
+    D: float,
+) -> np.ndarray:
+    """Compute coefficients C_{j,D}(mu) of (1 - 2 mu L + L^2)^D for j = 0, ..., T-1."""
+    _validate_compute_fractional_coefficients_single_cycle(T, R, D)
+    mu = compute_mu(T, R)
+    return compute_fractional_coefficients_from_mu(mu, D, T)
 
 
 def compute_fractional_coefficients_multi_cycle(
@@ -150,10 +163,13 @@ def filter_response_and_design(
     X_arr = np.asarray(X, dtype=float)
     T = len(y_arr)
     y_filtered = apply_filter_dynamic(y_arr, cycles, T, mode)
-    X_filtered = np.column_stack([
-        apply_filter_dynamic(X_arr[:, k], cycles, T, mode)
-        for k in range(X_arr.shape[1])
-    ])
+    if X_arr.shape[1] == 0:
+        X_filtered = np.empty((T, 0), dtype=float)
+    else:
+        X_filtered = np.column_stack([
+            apply_filter_dynamic(X_arr[:, k], cycles, T, mode)
+            for k in range(X_arr.shape[1])
+        ])
     return y_filtered, X_filtered
 
 
@@ -176,6 +192,33 @@ def _validate_compute_mu(T: int, R: int) -> None:
         raise InvalidConfigurationError(
             f"R must satisfy 0 <= R < T={T}, got R={R}."
         )
+
+
+def _validate_compute_fractional_coefficients_from_mu(
+    mu: float, D: float, length: int
+) -> None:
+    if isinstance(mu, bool):
+        raise InvalidConfigurationError("mu must not be a bool.")
+    try:
+        mu_val = float(mu)
+    except (TypeError, ValueError) as exc:
+        raise InvalidConfigurationError(f"mu must be numeric: {exc}") from exc
+    if not np.isfinite(mu_val):
+        raise InvalidConfigurationError(f"mu must be finite, got {mu}.")
+    if isinstance(D, bool):
+        raise InvalidConfigurationError("D must not be a bool.")
+    try:
+        D_val = float(D)
+    except (TypeError, ValueError) as exc:
+        raise InvalidConfigurationError(f"D must be a numeric value: {exc}") from exc
+    if not np.isfinite(D_val):
+        raise InvalidConfigurationError(f"D must be finite, got {D}.")
+    if isinstance(length, bool) or not isinstance(length, int):
+        raise InvalidConfigurationError(
+            f"length must be an int, got {type(length).__name__}."
+        )
+    if length < 1:
+        raise InvalidConfigurationError(f"length must be >= 1, got {length}.")
 
 
 def _validate_compute_fractional_coefficients_single_cycle(
@@ -322,5 +365,3 @@ def _validate_filter_response_and_design(y: object, X: object) -> None:
         raise InvalidConfigurationError(
             f"X.shape[0]={X_arr.shape[0]} must equal len(y)={len(y_arr)}."
         )
-    if X_arr.shape[1] < 1:
-        raise InvalidConfigurationError("X must have at least 1 column.")

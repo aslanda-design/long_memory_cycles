@@ -4,7 +4,9 @@ import pytest
 from cyclical_fractional_test import InvalidConfigurationError
 from cyclical_fractional_test.chebyshev import (
     build_chebyshev_design,
+    build_chebyshev_design_at,
     build_single_chebyshev_polynomial,
+    evaluate_single_chebyshev_polynomial,
 )
 
 
@@ -59,6 +61,17 @@ def test_build_chebyshev_design_without_intercept_has_expected_shape():
 def test_build_chebyshev_design_with_intercept_has_expected_shape():
     result = build_chebyshev_design(T=10, n_cycles=4, include_intercept=True)
     assert result.shape == (10, 5)
+    np.testing.assert_allclose(result[:, 0], np.ones(10))
+
+
+def test_build_chebyshev_design_zero_cycles_without_intercept_has_no_columns():
+    result = build_chebyshev_design(T=10, n_cycles=0, include_intercept=False)
+    assert result.shape == (10, 0)
+
+
+def test_build_chebyshev_design_zero_cycles_with_intercept_has_only_intercept():
+    result = build_chebyshev_design(T=10, n_cycles=0, include_intercept=True)
+    assert result.shape == (10, 1)
     np.testing.assert_allclose(result[:, 0], np.ones(10))
 
 
@@ -142,11 +155,6 @@ def test_build_chebyshev_design_rejects_float_T():
         build_chebyshev_design(T=10.0, n_cycles=4)  # type: ignore
 
 
-def test_build_chebyshev_design_rejects_zero_n_cycles():
-    with pytest.raises(InvalidConfigurationError):
-        build_chebyshev_design(T=10, n_cycles=0)
-
-
 def test_build_chebyshev_design_rejects_negative_n_cycles():
     with pytest.raises(InvalidConfigurationError):
         build_chebyshev_design(T=10, n_cycles=-2)
@@ -165,3 +173,47 @@ def test_build_chebyshev_design_rejects_non_boolean_intercept():
 def test_build_chebyshev_design_rejects_string_intercept():
     with pytest.raises(InvalidConfigurationError):
         build_chebyshev_design(T=10, n_cycles=4, include_intercept="yes")  # type: ignore
+
+
+# ---------------------------------------------------------------------------
+# build_chebyshev_design_at / evaluate_single_chebyshev_polynomial
+# ---------------------------------------------------------------------------
+
+
+def test_design_at_matches_in_sample_grid():
+    T = 30
+    t = np.arange(1, T + 1, dtype=float)
+    expected = build_chebyshev_design(T, 4, include_intercept=True)
+    got = build_chebyshev_design_at(t, T, 4, include_intercept=True)
+    np.testing.assert_allclose(got, expected)
+
+
+def test_design_at_zero_cycles_matches_in_sample_grid():
+    T = 30
+    t = np.arange(1, T + 1, dtype=float)
+    expected = build_chebyshev_design(T, 0, include_intercept=True)
+    got = build_chebyshev_design_at(t, T, 0, include_intercept=True)
+    np.testing.assert_allclose(got, expected)
+
+
+def test_evaluate_polynomial_matches_in_sample():
+    T = 25
+    t = np.arange(1, T + 1, dtype=float)
+    for k in (0, 1, 3):
+        np.testing.assert_allclose(
+            evaluate_single_chebyshev_polynomial(t, T, k),
+            build_single_chebyshev_polynomial(T, k),
+        )
+
+
+def test_design_at_extrapolates_beyond_T():
+    T = 20
+    t_future = np.arange(T + 1, T + 6, dtype=float)
+    X_future = build_chebyshev_design_at(t_future, T, 3, include_intercept=False)
+    assert X_future.shape == (5, 3)
+    assert np.all(np.isfinite(X_future))
+
+
+def test_design_at_rejects_empty_t():
+    with pytest.raises(InvalidConfigurationError):
+        build_chebyshev_design_at(np.array([]), 20, 3, include_intercept=False)

@@ -89,9 +89,8 @@ def test_validate_n_deterministic_cycles_accepts_positive_integer():
     assert validate_n_deterministic_cycles(4) == 4
 
 
-def test_validate_n_deterministic_cycles_rejects_zero():
-    with pytest.raises(InvalidConfigurationError):
-        validate_n_deterministic_cycles(0)
+def test_validate_n_deterministic_cycles_accepts_zero():
+    assert validate_n_deterministic_cycles(0) == 0
 
 
 def test_validate_n_deterministic_cycles_rejects_negative():

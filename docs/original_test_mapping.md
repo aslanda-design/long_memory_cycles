@@ -9,11 +9,11 @@ This table maps each step of the original statistical test to the concrete files
 | 1 | Import / validate Y(t) | Y(t), t=1,…,T | `validation.py`, `api.py` | `validate_series`, `run_cyclical_fractional_test` | ✅ Implemented |
 | 2 | Build Chebyshev basis | P_k(t) = 2cos(kπ(t−0.5)/T) | `chebyshev.py` | `build_chebyshev_design`, `build_single_chebyshev_polynomial` | ✅ Implemented |
 | 3 | Compute periodogram of Y(t) | I(λ_j) = \|FFT(Y)_j\|²/(2πT) | `spectral.py` | `compute_document_periodogram` | ✅ Implemented |
-| 3b | Locate R* | R* = argmax I(λ_j), j≥1 | `spectral.py` | `find_periodogram_peak`, `find_top_periodogram_peaks` | ✅ Implemented |
-| 4 | Build R candidate grid | R ∈ [R*−w, R*+w] ∩ [1, T−1] | `grid.py` | `build_r_grid_around_peak` | ✅ Implemented |
+| 3b | Locate R* | R* = argmax I(λ_j), usually j≥1 unless zero frequency is enabled | `spectral.py` | `find_periodogram_peak`, `find_top_periodogram_peaks` | ✅ Implemented |
+| 4 | Build R candidate grid | R ∈ [R*−w, R*+w] ∩ [R_min, T−1] | `grid.py` | `build_r_grid_around_peak` | ✅ Implemented |
 | 5a | Compute ψ(λ_j, R) | ψ = log\|2(cosλ_j − cosλ_R)\| | `spectral.py` | `compute_psi_single_cycle`, `compute_psi_dynamic` | ✅ Implemented |
 | 5b | Compute XAA(R) | XAA = (2/T) Σ ψ² | `spectral.py` | `compute_xaa_single_cycle`, `compute_xaa_dynamic` | ✅ Implemented |
-| 5c | Adjust XAA for residual AR errors | XAA_AR1 or XAA_AR2 projection correction | `spectral.py` | `compute_xaa_error_model`, `compute_xaa_ar1_dynamic`, `compute_xaa_ar1_single_cycle`, `compute_xaa_ar2_dynamic`, `compute_xaa_ar2_single_cycle` | ✅ Single-cycle implemented; multi-cycle placeholders |
+| 5c | Adjust XAA for residual AR errors | XAA_AR1 or XAA_AR2 projection correction | `spectral.py` | `compute_xaa_error_model`, `compute_xaa_ar1_dynamic`, `compute_xaa_ar1_single_cycle`, `compute_xaa_ar1_multi_cycle`, `compute_xaa_ar2_dynamic`, `compute_xaa_ar2_single_cycle`, `compute_xaa_ar2_multi_cycle` | ✅ Implemented |
 | 6 | Build D candidate grid | D ∈ [0, 1] | `grid.py` | `build_d_grid`, `build_default_d_coarse_grid`, `build_d_fine_grid`, `build_d_grid_for_strategy` | ✅ Implemented |
 | 6b | Iterate candidates | Cartesian (R, D), or per-R adaptive coarse→fine D | `grid.py`, `evaluation.py`, `api.py` | `build_single_cycle_candidate_grid`, `candidate_iterator`, `evaluate_r_with_adaptive_d` | ✅ Implemented |
 | 7 | Apply fractional cyclic filter | (1−2μL+L²)^D applied to Y and X | `filters.py` | `compute_mu`, `compute_fractional_coefficients_single_cycle`, `apply_fractional_filter_single_series`, `apply_single_cycle_filter`, `filter_response_and_design` | ✅ Implemented |
@@ -24,7 +24,7 @@ This table maps each step of the original statistical test to the concrete files
 | 10c | Build AR spectral adjustment | g(λ_j; φ̂) = \|1 − Σ_k φ̂_k exp(i k λ_j)\|^(−2) | `spectral.py` | `compute_ar_spectral_adjustment` | ✅ Implemented |
 | 11a | Time-domain variance VAR | VAR = (1/T) Σ ε̂(t)² | `regression.py` | `compute_time_variance` | ✅ Implemented |
 | 11b | Frequency-domain variance VAR* | VAR* = (2π/T) Σ I_resid(λ_j) | `spectral.py` | `compute_frequency_variance_single_cycle`, `compute_frequency_variance_dynamic` | ✅ Implemented |
-| 12 | Compute XA(R,D) | XA = −(2π/T) Σ ψ · I_resid, divided by g for AR errors | `spectral.py` | `compute_xa_single_cycle`, `compute_xa_ar_adjusted`, `compute_xa_error_model`, `compute_xa_ar1_dynamic`, `compute_xa_ar1_single_cycle`, `compute_xa_ar2_dynamic`, `compute_xa_ar2_single_cycle`, `compute_xa_dynamic` | ✅ Single-cycle implemented; multi-cycle placeholders |
+| 12 | Compute XA(R,D) | XA = −(2π/T) Σ ψ · I_resid, divided by g for AR errors | `spectral.py` | `compute_xa_single_cycle`, `compute_xa_multi_cycle`, `compute_xa_ar_adjusted`, `compute_xa_error_model`, `compute_xa_ar1_dynamic`, `compute_xa_ar1_single_cycle`, `compute_xa_ar1_multi_cycle`, `compute_xa_ar2_dynamic`, `compute_xa_ar2_single_cycle`, `compute_xa_ar2_multi_cycle`, `compute_xa_dynamic` | ✅ Implemented |
 | 13a | Compute TEST | TEST = √T / √XAA · XA / VAR | `scoring.py` | `compute_test_statistic` | ✅ Implemented |
 | 13b | Compute TEST* | TEST* = √T / √XAA · XA / VAR* | `scoring.py` | `compute_test_star_statistic` | ✅ Implemented |
 | PS | Select closest to zero | min \|TEST\| or \|TEST*\| over (R,D) | `scoring.py`, `evaluation.py`, `api.py` | `score_candidate`, `TopKSelector`, `evaluate_candidate`, `run_cyclical_fractional_test` | ✅ Implemented |
@@ -56,14 +56,16 @@ build_chebyshev_design(T, n_cycles, include_intercept)  # full (T, m) matrix
 ```python
 # spectral.py
 lambdas, I_y = compute_document_periodogram(y)
-r_peak = find_periodogram_peak(I_y, exclude_zero=True)
+r_peak = find_periodogram_peak(I_y, exclude_zero=True)   # use False to allow R=0
 ```
 
 ### Points 4 & 6 — Candidate grids
 
 ```python
 # grid.py
-r_candidates = build_r_grid_around_peak(r_peak, r_window, T)
+r_candidates = build_r_grid_around_peak(
+    r_peak, r_window, T, include_zero=not config.exclude_zero_frequency
+)
 
 # Fixed-grid strategy (config.d_search_strategy == "fixed_grid"):
 d_grid     = build_d_grid(config.d_grid)        # default [0.0, 0.1, ..., 1.0]

@@ -11,7 +11,9 @@ from .diagnostics import (
 from .evaluation import evaluate_candidate, evaluate_r_with_adaptive_d
 from .chebyshev import (
     build_chebyshev_design,
+    build_chebyshev_design_at,
     build_single_chebyshev_polynomial,
+    evaluate_single_chebyshev_polynomial,
 )
 from .config import CyclicalTestConfig
 from .exceptions import (
@@ -19,6 +21,14 @@ from .exceptions import (
     InvalidCycleError,
     InvalidConfigurationError,
     InvalidSeriesError,
+    NotFittedError,
+)
+from .model import CyclicalFractionalModel
+from .prediction import (
+    compute_ma_weights,
+    forecast_ar,
+    forecast_out_of_sample,
+    reconstruct_in_sample,
 )
 from .grid import (
     build_d_fine_grid,
@@ -43,6 +53,7 @@ from .filters import (
     apply_multi_cycle_filter,
     apply_single_cycle_filter,
     compute_fractional_coefficients_dynamic,
+    compute_fractional_coefficients_from_mu,
     compute_fractional_coefficients_multi_cycle,
     compute_fractional_coefficients_single_cycle,
     compute_mu,
@@ -54,6 +65,7 @@ from .regression import (
     compute_residuals,
     compute_time_variance,
     estimate_ar_ols,
+    estimate_innovation_variance,
     fit_filtered_regression,
 )
 from .scoring import (
@@ -116,6 +128,13 @@ __all__ = [
     "build_test_diagnostics",
     # config
     "CyclicalTestConfig",
+    # model — sklearn-style estimator
+    "CyclicalFractionalModel",
+    # prediction
+    "reconstruct_in_sample",
+    "forecast_ar",
+    "forecast_out_of_sample",
+    "compute_ma_weights",
     # results
     "StochasticCycle",
     "GridCandidateResult",
@@ -125,9 +144,12 @@ __all__ = [
     "InvalidSeriesError",
     "InvalidConfigurationError",
     "InvalidCycleError",
+    "NotFittedError",
     # chebyshev
     "build_single_chebyshev_polynomial",
+    "evaluate_single_chebyshev_polynomial",
     "build_chebyshev_design",
+    "build_chebyshev_design_at",
     # spectral — periodogram
     "compute_document_periodogram",
     "find_periodogram_peak",
@@ -174,6 +196,9 @@ __all__ = [
     "compute_residual_sum_squares",
     "compute_time_variance",
     "estimate_ar_ols",
+    "estimate_innovation_variance",
+    # filters — coefficient builder
+    "compute_fractional_coefficients_from_mu",
     # spectral — Wave 9
     "compute_ar_spectral_adjustment",
     "compute_residual_periodogram",

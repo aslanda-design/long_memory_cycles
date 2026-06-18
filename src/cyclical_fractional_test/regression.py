@@ -23,12 +23,30 @@ def fit_filtered_regression(
     y_filtered: np.ndarray,
     X_filtered: np.ndarray,
 ) -> RegressionResult:
-    """Fit y_filtered = X_filtered @ beta + residuals via OLS (np.linalg.lstsq)."""
+    """Fit y_filtered = X_filtered @ beta + residuals via OLS (np.linalg.lstsq).
+
+    If X_filtered has zero columns, no deterministic component is fitted:
+    betas is empty, fitted values are zero, and residuals equal y_filtered.
+    """
 
     _validate_fit_filtered_regression(y_filtered, X_filtered)
 
     y_arr = np.asarray(y_filtered, dtype=float)
     X_arr = np.asarray(X_filtered, dtype=float)
+    if X_arr.shape[1] == 0:
+        betas = np.empty(0, dtype=float)
+        fitted_values = np.zeros_like(y_arr, dtype=float)
+        residuals = compute_residuals(y_arr, fitted_values)
+        rss = compute_residual_sum_squares(residuals)
+        return RegressionResult(
+            betas=betas,
+            fitted_values=fitted_values,
+            residuals=residuals,
+            residual_sum_squares=rss,
+            rank=0,
+            condition_number=float("inf"),
+        )
+
     betas, _, rank, _ = np.linalg.lstsq(X_arr, y_arr, rcond=None)
     fitted_values = X_arr.dot(betas)
     residuals = compute_residuals(y_arr, fitted_values)
@@ -84,6 +102,32 @@ def estimate_ar_ols(residuals: np.ndarray, order: int) -> np.ndarray:
     return coefficients
 
 
+def estimate_innovation_variance(
+    residuals: np.ndarray,
+    ar_coefficients: np.ndarray,
+) -> float:
+    """Return σ̂² = mean(e_t²), the variance of the AR innovations.
+
+    For white noise (no AR coefficients) the innovations are the residuals
+    themselves. For AR(p), e_t = ε_t − Σ_i φ_i ε_{t−i} is computed on the
+    samples t > p where the full lag window is available.
+    """
+    _validate_estimate_innovation_variance(residuals, ar_coefficients)
+    residuals_arr = np.asarray(residuals, dtype=float)
+    coeffs = np.asarray(ar_coefficients, dtype=float)
+    order = len(coeffs)
+    if order == 0:
+        return float(np.mean(residuals_arr ** 2))
+
+    target = residuals_arr[order:]
+    predicted = sum(
+        coeffs[lag - 1] * residuals_arr[order - lag : len(residuals_arr) - lag]
+        for lag in range(1, order + 1)
+    )
+    innovations = target - predicted
+    return float(np.mean(innovations ** 2))
+
+
 # ---------------------------------------------------------------------------
 # Validators
 # In this section we define the input validation for each of the functions of
@@ -113,8 +157,6 @@ def _validate_fit_filtered_regression(y_filtered: object, X_filtered: object) ->
         raise InvalidConfigurationError(
             f"X_filtered.shape[0]={X_arr.shape[0]} must equal len(y_filtered)={len(y_arr)}."
         )
-    if X_arr.shape[1] < 1:
-        raise InvalidConfigurationError("X_filtered must have at least 1 column.")
 
 
 def _validate_compute_residuals(y_filtered: object, fitted_values: object) -> None:
@@ -137,6 +179,30 @@ def _validate_1d_array(arr: object, name: str) -> None:
         raise InvalidConfigurationError(f"{name} must be numeric: {exc}") from exc
     if arr_np.ndim != 1 or arr_np.size == 0:
         raise InvalidConfigurationError(f"{name} must be a non-empty 1-D array.")
+
+
+def _validate_estimate_innovation_variance(
+    residuals: object, ar_coefficients: object
+) -> None:
+    _validate_1d_array(residuals, "residuals")
+    residuals_arr = np.asarray(residuals, dtype=float)
+    if not np.all(np.isfinite(residuals_arr)):
+        raise InvalidConfigurationError("residuals contains non-finite values.")
+    try:
+        coeffs = np.asarray(ar_coefficients, dtype=float)
+    except (TypeError, ValueError) as exc:
+        raise InvalidConfigurationError(
+            f"ar_coefficients must be numeric: {exc}"
+        ) from exc
+    if coeffs.ndim != 1:
+        raise InvalidConfigurationError("ar_coefficients must be a 1-D array.")
+    if not np.all(np.isfinite(coeffs)):
+        raise InvalidConfigurationError("ar_coefficients contains non-finite values.")
+    if len(residuals_arr) <= len(coeffs):
+        raise InvalidConfigurationError(
+            f"innovation variance needs more than {len(coeffs)} residuals, "
+            f"got {len(residuals_arr)}."
+        )
 
 
 def _validate_estimate_ar_ols(residuals: object, order: int) -> None:

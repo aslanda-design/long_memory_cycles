@@ -148,6 +148,36 @@ def test_include_intercept_adds_extra_beta():
     assert all(len(c.betas) == 4 for c in result.top_k_results)
 
 
+def test_zero_deterministic_cycles_with_intercept_fits_only_intercept():
+    result = run_cyclical_fractional_test(
+        _series(T=60),
+        config=CyclicalTestConfig(
+            n_deterministic_cycles=0,
+            include_intercept=True,
+            d_grid=np.array([0.0]),
+            r_window=1,
+            top_k=1,
+            stochastic_cycle_mode="single",
+        ),
+    )
+    assert all(len(c.betas) == 1 for c in result.top_k_results)
+
+
+def test_zero_deterministic_cycles_without_intercept_fits_no_betas():
+    result = run_cyclical_fractional_test(
+        _series(T=60),
+        config=CyclicalTestConfig(
+            n_deterministic_cycles=0,
+            include_intercept=False,
+            d_grid=np.array([0.0]),
+            r_window=1,
+            top_k=1,
+            stochastic_cycle_mode="single",
+        ),
+    )
+    assert all(c.betas.shape == (0,) for c in result.top_k_results)
+
+
 def test_all_test_values_are_finite():
     result = run_cyclical_fractional_test(_series(), config=_small_config())
     assert all(np.isfinite(c.test_value) and np.isfinite(c.test_star_value) for c in result.top_k_results)

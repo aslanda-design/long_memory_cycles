@@ -60,7 +60,9 @@ In practice this is computed via the Fast Fourier Transform:
 I(λ_j) = |FFT(Y)_j|² / (2π T)
 ```
 
-The dominant cyclic frequency R* is the index j that maximises I(λ_j), typically excluding j=0 (the mean contribution).
+The dominant frequency R* is the index j that maximises I(λ_j), typically
+excluding j=0 (the mean contribution). Set `exclude_zero_frequency=False` to
+allow R=0 to enter the search.
 
 ---
 
@@ -69,10 +71,11 @@ The dominant cyclic frequency R* is the index j that maximises I(λ_j), typicall
 A symmetric window of width `r_window` is built around R*:
 
 ```
-R ∈ { max(1, R* − r_window), ..., min(T−1, R* + r_window) }
+R ∈ { max(R_min, R* − r_window), ..., min(T−1, R* + r_window) }
 ```
 
-The default `r_window = 10` gives at most 21 R candidates.
+The default is `R_min=1`, so frequency zero is excluded. When
+`exclude_zero_frequency=False`, `R_min=0` and R=0 may be a candidate.
 
 ---
 
@@ -84,9 +87,14 @@ For each candidate R, define:
 ψ(λ_j, R) = log( |2 ( cos(λ_j) − cos(λ_R) )| )
 ```
 
-This is the score function of the cyclic fractional spectral model.
+This is the score function of the fractional spectral model. For R=0 the
+frequency is zero rather than oscillatory, and the filter becomes
+`(1 − 2L + L²)^D = (1 − L)^(2D)`.
 
-**Singularity handling.** The expression is singular at j = R and at j = T−R (the mirror frequency). Both positions are set to 0 when `drop_singular_frequency=True` (the default). See [implementation_notes.md](implementation_notes.md) for details.
+**Singularity handling.** The expression is singular at j = R and at j = T−R
+(the mirror frequency). For R=0, the only in-array singularity is j=0. Singular
+positions are set to 0 when `drop_singular_frequency=True` (the default). See
+[implementation_notes.md](implementation_notes.md) for details.
 
 ---
 
@@ -255,9 +263,9 @@ The estimated AR coefficients are nuisance parameters used to adjust the score s
 
 The AR(1)/AR(2) specification is independent of the number of stochastic
 cycles. The code therefore exposes separate single-cycle implementations and
-multi-cycle placeholders for adjusted XAA and XA. Multi-cycle AR formulas are
-not evaluated yet because the general multi-cycle ψ, XAA, and XA definitions
-remain pending.
+multi-cycle implementations for adjusted XAA and XA. The multi-cycle AR
+formulas use the same projection adjustments, replacing `ψ(λ_j)` with the
+aggregate `ψ_multi(λ_j)`.
 
 ---
 
@@ -277,7 +285,9 @@ This is the second moment of the residuals (not the centered variance).
 VAR*(R, D) = (2π / T) Σ_{j=0}^{T−1} I_resid(λ_j)
 ```
 
-When `drop_singular_frequency=True`, the term at j = R is excluded from the sum. Under Parseval's theorem, VAR ≈ VAR* for well-specified models.
+When `drop_singular_frequency=True`, the term at j = R is excluded from the sum,
+including j=0 for R=0. Under Parseval's theorem, VAR ≈ VAR* for well-specified
+models.
 
 ---
 
@@ -347,4 +357,119 @@ Rather than storing the full grid, the algorithm retains only the `top_k` candid
 
 ## 18. Multi-cycle architecture
 
-The codebase separates single-cycle and multi-cycle paths via dispatcher functions (`compute_psi_dynamic`, `compute_xa_dynamic`, etc.). Multi-cycle support (`stochastic_cycle_mode="multi_cycle"`) is architecturally prepared but not yet numerically implemented; calling it raises `NotImplementedError`.
+The codebase separates single-cycle and multi-cycle paths via dispatcher functions (`compute_psi_dynamic`, `compute_xa_dynamic`, etc.).
+
+With `stochastic_cycle_mode="multi_cycle"`, the API selects the top `n_stochastic_cycles = k` periodogram peaks:
+
+```
+R_1, ..., R_k = top-k indices of I(λ_j)
+```
+
+Multi-cycle search evaluates joint D vectors. A candidate is the tuple:
+
+```
+((R_1, D_1), ..., (R_k, D_k))
+```
+
+Fixed-grid search evaluates every tuple in the Cartesian product `D_grid^k`.
+For `m = len(D_grid)`, this gives `m^k` multi-cycle candidates. Adaptive search
+evaluates the coarse Cartesian product, chooses the best coarse D vector, and
+then evaluates the local fine Cartesian product around that vector. The
+residuals, XA, XAA, VAR, VAR*, and AR nuisance coefficients are computed from
+each complete multi-cycle filter, so the selected `D_q` values are not marginal
+per-frequency optima.
+
+The scalar multi-cycle score uses the aggregate function:
+
+```
+ψ_multi(λ_j) = Σ_q log( |2 (cos(λ_j) − cos(λ_Rq))| )
+```
+
+In-array singular positions at every `R_q` and `T−R_q` are set to zero when
+`drop_singular_frequency=True`; for `R_q=0`, this is only `j=0`.
+
+The white-noise multi-cycle quantities are:
+
+```
+XAA_multi = (2/T) Σ_j ψ_multi(λ_j)^2
+
+XA_multi = −(2π/T) Σ_j ψ_multi(λ_j) I_resid(λ_j)
+```
+
+AR(1) and AR(2) multi-cycle adjustments use the same projection formulas as Section 12a, replacing `ψ(λ_j)` with `ψ_multi(λ_j)`.
+
+---
+
+## 19. Prediction (scikit-learn-style model)
+
+Once a candidate `(R, D)` is selected, the fitted objects define a complete generative model that can reconstruct and forecast the series. With `β̂` the OLS coefficients, `ε̂` the filtered-regression residuals, and `φ̂` the AR error coefficients:
+
+```
+Y_t            = X_t·β̂ + S_t                       (deterministic + stochastic)
+filter_{R,D}(S)_t = ε̂_t                             (cyclic long memory)
+ε̂_t           = Σ_{i=1}^{p} φ̂_i·ε̂_{t-i} + e_t      (AR(p) error, p ∈ {0,1,2})
+```
+
+A key identity makes this exact and cheap to compute: because the filter is linear,
+
+```
+ε̂ = Y_D − X_D β̂ = filter_{R,D}(Y − X β̂) = filter_{R,D}(S),
+```
+
+so the regression residuals **are** the filtered stochastic part — no refiltering is needed.
+
+### 19.1 In-sample reconstruction (one-step conditional mean)
+
+For t = 1, …, T the predicted value is the one-step-ahead conditional mean
+
+```
+ŷ_t = X_t·β̂ − Σ_{j=1}^{t-1} C_j·S_{t-j} + Σ_{i=1}^{p} φ̂_i·ε̂_{t-i},
+```
+
+where `C_j` are the fractional-filter coefficients of Section 9 and `S_t = Y_t − X_t·β̂`. The prediction error equals the AR innovation exactly:
+
+```
+Y_t − ŷ_t = ε̂_t − Σ_i φ̂_i·ε̂_{t-i} = e_t.
+```
+
+For `D = 0` (identity filter, white noise) this collapses to the deterministic OLS fit `ŷ_t = X_t·β̂`.
+
+### 19.2 Out-of-sample forecast
+
+For t = T+1, …, T+h the error is forecast first by the AR recursion (expected innovation zero),
+
+```
+ε̂_{T+k} = Σ_{i=1}^{p} φ̂_i·ε̂_{T+k-i},
+```
+
+then the stochastic component is propagated by inverting the cyclic filter,
+
+```
+Ŝ_{T+k} = ε̂_{T+k} − Σ_{j=1}^{T+k-1} C_j·Ŝ_{T+k-j},
+```
+
+reusing the in-sample `S` values for the known indices, and finally
+
+```
+ŷ_{T+k} = X_{T+k}·β̂ + Ŝ_{T+k}.
+```
+
+The deterministic term extrapolates the Chebyshev basis `P_k(t) = 2cos(kπ(t−0.5)/T_ref)` with the **training length `T_ref = T` held fixed**, so the basis is evaluated consistently beyond the sample. The filter coefficients `C_j` are extended to length `T+h` using the recursion of Section 9 with `μ = cos(2πR/T)` fixed at the training frequency.
+
+### 19.3 AR coefficient estimation
+
+The AR coefficients `φ̂` are the same nuisance parameters estimated by OLS from `ε̂` (Section 12a); prediction reuses them rather than re-estimating. The only additional quantity is the innovation variance
+
+```
+σ̂² = mean(e_t²),   e_t = ε̂_t − Σ_i φ̂_i·ε̂_{t-i}.
+```
+
+### 19.4 Prediction intervals
+
+In-sample bounds use the one-step innovation standard deviation `σ̂`. Forecast bounds widen with the MA(∞) weights `ψ_l` of the inverse system `S = filter_{R,D}^{-1}(ε)` with `ε = AR(p)^{-1}(e)` — the convolution of the inverse-filter coefficients (params `−D`) with the AR inverse MA weights. The horizon-k forecast-error variance is
+
+```
+Var(ŷ_{T+k}) = σ̂² · Σ_{l=0}^{k-1} ψ_l².
+```
+
+Parameter-estimation uncertainty is not included.

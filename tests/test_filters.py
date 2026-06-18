@@ -220,6 +220,16 @@ def test_filter_response_shapes_unchanged():
     assert X_f.shape == (T, p)
 
 
+def test_filter_response_accepts_design_with_no_columns():
+    T = 10
+    rng = np.random.default_rng(42)
+    y = rng.standard_normal(T)
+    X = np.empty((T, 0), dtype=float)
+    y_f, X_f = filter_response_and_design(y, X, [StochasticCycle(R=2, D=0.4)])
+    assert y_f.shape == (T,)
+    assert X_f.shape == (T, 0)
+
+
 def test_filter_D_zero_leaves_y_and_X_unchanged():
     T = 8
     y = np.random.default_rng(0).standard_normal(T)

@@ -8,8 +8,31 @@ from cyclical_fractional_test.regression import (
     compute_residuals,
     compute_time_variance,
     estimate_ar_ols,
+    estimate_innovation_variance,
     fit_filtered_regression,
 )
+
+
+# ---------------------------------------------------------------------------
+# estimate_innovation_variance
+# ---------------------------------------------------------------------------
+
+
+def test_innovation_variance_white_noise_is_mean_square():
+    r = np.array([1.0, -2.0, 3.0, 0.5])
+    assert np.isclose(estimate_innovation_variance(r, np.array([])), np.mean(r ** 2))
+
+
+def test_innovation_variance_ar1_matches_manual():
+    r = np.array([0.4, -0.2, 0.6, 0.1, -0.3])
+    phi = np.array([0.5])
+    e = r[1:] - 0.5 * r[:-1]
+    assert np.isclose(estimate_innovation_variance(r, phi), np.mean(e ** 2))
+
+
+def test_innovation_variance_rejects_too_short_series():
+    with pytest.raises(InvalidConfigurationError):
+        estimate_innovation_variance(np.array([1.0]), np.array([0.5]))
 
 
 # ---------------------------------------------------------------------------
@@ -70,6 +93,16 @@ def test_fit_output_shapes():
     assert result.betas.shape == (p,)
     assert result.fitted_values.shape == (T,)
     assert result.residuals.shape == (T,)
+
+
+def test_fit_accepts_no_regressors():
+    y = np.array([1.0, -2.0, 3.0, 0.5])
+    X = np.empty((len(y), 0), dtype=float)
+    result = fit_filtered_regression(y, X)
+    assert result.betas.shape == (0,)
+    np.testing.assert_allclose(result.fitted_values, np.zeros_like(y))
+    np.testing.assert_allclose(result.residuals, y)
+    assert result.rank == 0
 
 
 def test_fit_returns_regression_result():

@@ -54,9 +54,9 @@ def validate_n_deterministic_cycles(n: Any) -> int:
         raise InvalidConfigurationError(
             f"n_deterministic_cycles must be an int, got {type(n).__name__}."
         )
-    if n < 1:
+    if n < 0:
         raise InvalidConfigurationError(
-            f"n_deterministic_cycles must be >= 1, got {n}."
+            f"n_deterministic_cycles must be >= 0, got {n}."
         )
     return n
 

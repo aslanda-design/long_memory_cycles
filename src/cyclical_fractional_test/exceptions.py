@@ -12,3 +12,7 @@ class InvalidConfigurationError(CyclicalFractionalTestError):
 
 class InvalidCycleError(CyclicalFractionalTestError):
     """A stochastic cycle, or a group of cycles, is inconsistent."""
+
+
+class NotFittedError(CyclicalFractionalTestError):
+    """A model method requiring a prior fit was called before fitting."""
