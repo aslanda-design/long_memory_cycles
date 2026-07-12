@@ -79,6 +79,7 @@ def evaluate_candidate(
         variance_time=variance_time,
         variance_frequency=variance_frequency,
         betas=reg.betas,
+        beta_standard_errors=reg.beta_standard_errors,
         residuals=reg.residuals,
         residual_sum_squares=reg.residual_sum_squares,
     )

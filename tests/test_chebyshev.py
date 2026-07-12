@@ -105,6 +105,33 @@ def test_build_chebyshev_design_n_cycles_1_no_intercept():
     )
 
 
+def test_build_chebyshev_design_uses_explicit_orders_without_intercept():
+    X = build_chebyshev_design(
+        T=8,
+        n_cycles=99,
+        include_intercept=False,
+        orders=(2, 5),
+    )
+
+    assert X.shape == (8, 2)
+    np.testing.assert_allclose(X[:, 0], build_single_chebyshev_polynomial(8, 2))
+    np.testing.assert_allclose(X[:, 1], build_single_chebyshev_polynomial(8, 5))
+
+
+def test_build_chebyshev_design_uses_explicit_orders_with_intercept():
+    X = build_chebyshev_design(
+        T=8,
+        n_cycles=99,
+        include_intercept=True,
+        orders=(2, 5),
+    )
+
+    assert X.shape == (8, 3)
+    np.testing.assert_allclose(X[:, 0], np.ones(8))
+    np.testing.assert_allclose(X[:, 1], build_single_chebyshev_polynomial(8, 2))
+    np.testing.assert_allclose(X[:, 2], build_single_chebyshev_polynomial(8, 5))
+
+
 # ---------------------------------------------------------------------------
 # Error cases — build_single_chebyshev_polynomial
 # ---------------------------------------------------------------------------
@@ -175,6 +202,12 @@ def test_build_chebyshev_design_rejects_string_intercept():
         build_chebyshev_design(T=10, n_cycles=4, include_intercept="yes")  # type: ignore
 
 
+@pytest.mark.parametrize("bad_orders", [(), (0,), (-1,), (2, 2), (True,), (1.5,)])
+def test_build_chebyshev_design_rejects_bad_explicit_orders(bad_orders):
+    with pytest.raises(InvalidConfigurationError):
+        build_chebyshev_design(T=10, n_cycles=4, orders=bad_orders)
+
+
 # ---------------------------------------------------------------------------
 # build_chebyshev_design_at / evaluate_single_chebyshev_polynomial
 # ---------------------------------------------------------------------------
@@ -185,6 +218,14 @@ def test_design_at_matches_in_sample_grid():
     t = np.arange(1, T + 1, dtype=float)
     expected = build_chebyshev_design(T, 4, include_intercept=True)
     got = build_chebyshev_design_at(t, T, 4, include_intercept=True)
+    np.testing.assert_allclose(got, expected)
+
+
+def test_design_at_matches_explicit_order_in_sample_grid():
+    T = 30
+    t = np.arange(1, T + 1, dtype=float)
+    expected = build_chebyshev_design(T, 4, include_intercept=True, orders=(3, 9))
+    got = build_chebyshev_design_at(t, T, 4, include_intercept=True, orders=(3, 9))
     np.testing.assert_allclose(got, expected)
 
 

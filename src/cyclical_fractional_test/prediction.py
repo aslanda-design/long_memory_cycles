@@ -95,6 +95,7 @@ def forecast_out_of_sample(
     ar_coefficients: np.ndarray,
     mode: str = "single",
     horizon: int | None = None,
+    coefficient_t_ref: int | None = None,
 ) -> np.ndarray:
     """Forecast ŷ_t for t = T+1, ..., T+horizon.
 
@@ -102,10 +103,24 @@ def forecast_out_of_sample(
     inverting the cyclic filter, S_a = ε̂_a − Σ_{j=1}^{a} C_j·S_{a-j}, reusing the
     in-sample S values for the known indices. The deterministic part X_future·β̂
     extrapolates the Chebyshev basis with the training length held fixed.
+
+    `coefficient_t_ref` optionally fixes the cyclic-filter reference length used
+    to compute mu. The default is len(y), which is the usual out-of-sample case.
+    Use a larger value when forecasting recursively from a cutoff inside a model
+    that was fitted on a longer sample.
     """
     h = X_future.shape[0] if horizon is None else horizon
     _validate_forecast_out_of_sample(
-        y, X, X_future, cycles, betas, residuals, ar_coefficients, mode, h
+        y,
+        X,
+        X_future,
+        cycles,
+        betas,
+        residuals,
+        ar_coefficients,
+        mode,
+        h,
+        coefficient_t_ref,
     )
 
     y_arr = np.asarray(y, dtype=float)
@@ -116,10 +131,11 @@ def forecast_out_of_sample(
     phi = np.asarray(ar_coefficients, dtype=float)
     p = len(phi)
     T = len(y_arr)
+    t_ref = T if coefficient_t_ref is None else int(coefficient_t_ref)
 
     S_known = y_arr - X_arr.dot(betas_arr)
     deterministic_future = X_future_arr.dot(betas_arr)
-    C = _combined_coefficients(cycles, T, T + h, mode)
+    C = _combined_coefficients(cycles, t_ref, T + h, mode)
 
     eps_full = np.concatenate([eps, np.zeros(h, dtype=float)])
     S_full = np.concatenate([S_known, np.zeros(h, dtype=float)])
@@ -321,13 +337,32 @@ def _validate_forecast_ar(residuals, ar_coefficients, horizon) -> None:
 
 
 def _validate_forecast_out_of_sample(
-    y, X, X_future, cycles, betas, residuals, ar_coefficients, mode, horizon
+    y,
+    X,
+    X_future,
+    cycles,
+    betas,
+    residuals,
+    ar_coefficients,
+    mode,
+    horizon,
+    coefficient_t_ref=None,
 ) -> None:
     y_arr = _validate_y(y)
     _validate_cycles_and_mode(cycles, mode)
     _validate_design_and_betas(y_arr, X, betas, residuals)
     _validate_ar_coefficients(ar_coefficients)
     _validate_horizon(horizon)
+    if coefficient_t_ref is not None:
+        if (
+            isinstance(coefficient_t_ref, bool)
+            or not isinstance(coefficient_t_ref, (int, np.integer))
+            or int(coefficient_t_ref) < len(y_arr)
+        ):
+            raise InvalidConfigurationError(
+                "coefficient_t_ref must be an int greater than or equal to len(y), "
+                f"got {coefficient_t_ref!r} for len(y)={len(y_arr)}."
+            )
     try:
         X_future_arr = np.asarray(X_future, dtype=float)
     except (TypeError, ValueError) as exc:

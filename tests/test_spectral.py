@@ -5,6 +5,7 @@ from cyclical_fractional_test.exceptions import InvalidConfigurationError, Inval
 from cyclical_fractional_test.results import StochasticCycle
 from cyclical_fractional_test.spectral import (
     compute_ar_spectral_adjustment,
+    compute_autocorrelogram,
     compute_document_periodogram,
     compute_frequency_variance_dynamic,
     compute_frequency_variance_multi_cycle,
@@ -255,6 +256,49 @@ def test_periodogram_rejects_non_finite():
         compute_document_periodogram(np.array([1.0, np.nan]))
     with pytest.raises(InvalidSeriesError):
         compute_document_periodogram(np.array([1.0, np.inf, 3.0]))
+
+
+# ---------------------------------------------------------------------------
+# compute_autocorrelogram
+# ---------------------------------------------------------------------------
+
+
+def test_autocorrelogram_matches_manual_unadjusted_values():
+    x = np.array([1.0, 2.0, 3.0, 4.0])
+    lags, autocorr = compute_autocorrelogram(x, max_lag=2)
+    centered = x - np.mean(x)
+    denominator = np.dot(centered, centered)
+    expected = np.array([
+        1.0,
+        np.dot(centered[:-1], centered[1:]) / denominator,
+        np.dot(centered[:-2], centered[2:]) / denominator,
+    ])
+    np.testing.assert_array_equal(lags, np.array([0, 1, 2]))
+    np.testing.assert_allclose(autocorr, expected)
+
+
+def test_autocorrelogram_adjusted_uses_lag_denominator():
+    x = np.array([1.0, 2.0, 3.0, 4.0])
+    _, unadjusted = compute_autocorrelogram(x, max_lag=2, adjusted=False)
+    _, adjusted = compute_autocorrelogram(x, max_lag=2, adjusted=True)
+    np.testing.assert_allclose(
+        adjusted[1:], unadjusted[1:] * np.array([4 / 3, 4 / 2])
+    )
+
+
+def test_autocorrelogram_default_max_lag_uses_full_series():
+    lags, autocorr = compute_autocorrelogram(np.array([1.0, 2.0, 4.0]))
+    np.testing.assert_array_equal(lags, np.array([0, 1, 2]))
+    assert autocorr.shape == (3,)
+
+
+def test_autocorrelogram_rejects_bad_inputs():
+    with pytest.raises(InvalidConfigurationError):
+        compute_autocorrelogram(np.array([1.0, 2.0, 3.0]), max_lag=3)
+    with pytest.raises(InvalidConfigurationError):
+        compute_autocorrelogram(np.array([1.0, 1.0, 1.0]))
+    with pytest.raises(InvalidSeriesError):
+        compute_autocorrelogram(np.array([1.0, np.nan, 3.0]))
 
 
 # ---------------------------------------------------------------------------

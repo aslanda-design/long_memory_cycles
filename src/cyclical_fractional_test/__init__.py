@@ -1,4 +1,10 @@
-from .api import compute_periodogram, run_cyclical_fractional_test
+from importlib.metadata import PackageNotFoundError, version
+
+from .api import (
+    compute_autocorrelogram,
+    compute_periodogram,
+    run_cyclical_fractional_test,
+)
 from .diagnostics import (
     PeriodogramSummary,
     TestDiagnostics,
@@ -60,10 +66,15 @@ from .filters import (
     filter_response_and_design,
 )
 from .regression import (
+    BetaSignificanceResult,
+    DEFAULT_BETA_SIGNIFICANCE_CRITICAL_VALUE,
     RegressionResult,
+    compute_beta_standard_errors,
+    compute_beta_t_statistics,
     compute_residual_sum_squares,
     compute_residuals,
     compute_time_variance,
+    detect_beta_significance,
     estimate_ar_ols,
     estimate_innovation_variance,
     fit_filtered_regression,
@@ -109,8 +120,15 @@ from .spectral import (
     find_top_periodogram_peaks,
 )
 
+try:
+    __version__ = version("cyclical-fractional-test")
+except PackageNotFoundError:
+    __version__ = "0.1.0"
+
 __all__ = [
+    "__version__",
     # api
+    "compute_autocorrelogram",
     "compute_periodogram",
     "run_cyclical_fractional_test",
     # evaluation — Wave 12
@@ -190,8 +208,13 @@ __all__ = [
     "apply_filter_dynamic",
     "filter_response_and_design",
     # regression — Wave 8
+    "BetaSignificanceResult",
+    "DEFAULT_BETA_SIGNIFICANCE_CRITICAL_VALUE",
     "RegressionResult",
     "fit_filtered_regression",
+    "compute_beta_standard_errors",
+    "compute_beta_t_statistics",
+    "detect_beta_significance",
     "compute_residuals",
     "compute_residual_sum_squares",
     "compute_time_variance",

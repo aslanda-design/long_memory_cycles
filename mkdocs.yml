@@ -1,0 +1,34 @@
+site_name: cyclical-fractional-test
+site_description: Statistical test for fractional cyclic long memory in time series.
+repo_url: https://github.com/aslanda-design/log_memory_cycles
+repo_name: aslanda-design/log_memory_cycles
+
+theme:
+  name: material
+  features:
+    - navigation.sections
+    - navigation.top
+    - content.code.copy
+
+nav:
+  - Home: index.md
+  - Quickstart: quickstart.md
+  - API Reference: api_reference.md
+  - Mathematical Background: mathematical_background.md
+  - Original Test Mapping: original_test_mapping.md
+  - Data Flow Diagram: data_flow_diagram.md
+  - Implementation Notes: implementation_notes.md
+  - Development: development.md
+  - Publishing: publishing.md
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - md_in_html
+  - toc:
+      permalink: true
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format

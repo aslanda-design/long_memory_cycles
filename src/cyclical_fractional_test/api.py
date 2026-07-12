@@ -24,9 +24,8 @@ from .grid import (
 from .results import CyclicalFractionalTestResult, GridCandidateResult, StochasticCycle
 from .scoring import TopKSelector, score_candidate
 from .spectral import (
+    compute_autocorrelogram as compute_series_autocorrelogram,
     compute_document_periodogram,
-    find_periodogram_peak,
-    find_top_periodogram_peaks,
 )
 from .validation import validate_config, validate_series
 
@@ -39,6 +38,19 @@ def compute_periodogram(y: Any) -> Tuple[np.ndarray, np.ndarray]:
     """
     arr = validate_series(y)
     return compute_document_periodogram(arr)
+
+
+def compute_autocorrelogram(
+    y: Any,
+    max_lag: int | None = None,
+    adjusted: bool = False,
+) -> Tuple[np.ndarray, np.ndarray]:
+    """Return the autocorrelogram of a time series.
+
+    Returns (lags, autocorrelations), where lags are 0, ..., max_lag and
+    autocorrelations are sample autocorrelations of the demeaned series.
+    """
+    return compute_series_autocorrelogram(y, max_lag=max_lag, adjusted=adjusted)
 
 
 def run_cyclical_fractional_test(
@@ -54,12 +66,16 @@ def run_cyclical_fractional_test(
     stochastic_cycle_mode='single' searches one cycle. stochastic_cycle_mode='multi_cycle'
     selects the top n_stochastic_cycles periodogram peaks and evaluates joint
     fixed-grid or adaptive Cartesian products of D values for those simultaneous cycles.
+    config.ignored_stochastic_rs excludes known frequency indices from stochastic
+    cycle selection. config.chebyshev_orders can replace the contiguous
+    deterministic Chebyshev basis with explicit positive polynomial orders.
     The result includes a TestDiagnostics object and per-candidate AR nuisance estimates.
 
     If threshold is given (a positive float), the result's under_threshold_results
     collects every evaluated candidate whose statistic score (|TEST| or |TEST*|,
-    per config.statistic_mode) falls below it, grouped by frequency R so each R maps
-    to its passing D values. When threshold is None this object stays None.
+    per config.statistic_mode) falls below it. Results are grouped by the full
+    frequency tuple: (R,) for single-cycle candidates and (R1, R2, ...) for
+    multi-cycle candidates. When threshold is None this object stays None.
     """
     if config is None:
         config = CyclicalTestConfig()
@@ -79,10 +95,16 @@ def run_cyclical_fractional_test(
         )
 
     T = len(arr)
-    X = build_chebyshev_design(T, config.n_deterministic_cycles, config.include_intercept)
+    X = build_chebyshev_design(
+        T,
+        config.n_deterministic_cycles,
+        config.include_intercept,
+        config.chebyshev_orders,
+    )
 
     lambdas_y, I_y = compute_document_periodogram(arr)
     periodogram = I_y[:len(I_y) // 2]
+    ignored_rs = _build_ignored_r_set(config, T)
 
     # The reported grid is the full fixed grid, or the coarse seed for adaptive search.
     d_grid = build_d_grid_for_strategy(config)
@@ -97,9 +119,10 @@ def run_cyclical_fractional_test(
             d_grid=d_grid,
             config=config,
             threshold_value=threshold_value,
+            ignored_rs=ignored_rs,
         )
 
-    r_peak = find_periodogram_peak(periodogram, exclude_zero=config.exclude_zero_frequency)
+    r_peak = _find_periodogram_peak_excluding(periodogram, ignored_rs)
 
     r_candidates = build_r_grid_around_peak(
         r_peak,
@@ -107,12 +130,13 @@ def run_cyclical_fractional_test(
         T,
         include_zero=not config.exclude_zero_frequency,
     )
+    r_candidates = _filter_ignored_r_candidates(r_candidates, ignored_rs)
 
     selector = TopKSelector(k=config.top_k, statistic_mode=config.statistic_mode)
 
     # When a threshold is requested, collect every evaluated candidate that scores
-    # below it, grouped by R; otherwise leave the object as None.
-    under_threshold_results: Optional[Dict[int, List[GridCandidateResult]]] = (
+    # below it, grouped by full frequency tuple; otherwise leave it as None.
+    under_threshold_results: Optional[Dict[Tuple[int, ...], List[GridCandidateResult]]] = (
         {} if threshold_value is not None else None
     )
 
@@ -126,7 +150,11 @@ def run_cyclical_fractional_test(
             selector.consider(candidate_result)
             if under_threshold_results is not None:
                 _record_if_under_threshold(
-                    under_threshold_results, candidate_result, threshold_value, config.statistic_mode
+                    under_threshold_results,
+                    candidate_result,
+                    threshold_value,
+                    config.statistic_mode,
+                    config.return_residuals_for_threshold,
                 )
             n_evaluated += 1
             logger.info(
@@ -147,7 +175,11 @@ def run_cyclical_fractional_test(
             if under_threshold_results is not None:
                 for candidate in search.all_results:
                     _record_if_under_threshold(
-                        under_threshold_results, candidate, threshold_value, config.statistic_mode
+                        under_threshold_results,
+                        candidate,
+                        threshold_value,
+                        config.statistic_mode,
+                        config.return_residuals_for_threshold,
                     )
             n_evaluated += search.n_candidates_evaluated
             n_coarse += search.n_coarse_evaluated
@@ -176,7 +208,7 @@ def run_cyclical_fractional_test(
     best_result = selector.get_best()
 
     if under_threshold_results is not None:
-        # Order R ascending and, within each R, list the passing D candidates best-first.
+        # Order R tuples ascending and list passing candidates best-first.
         under_threshold_results = {
             R: sorted(candidates, key=lambda c: score_candidate(c, config.statistic_mode))
             for R, candidates in sorted(under_threshold_results.items())
@@ -219,16 +251,17 @@ def _run_multi_cycle_fractional_test(
     d_grid: np.ndarray,
     config: CyclicalTestConfig,
     threshold_value: Optional[float],
+    ignored_rs: set[int],
 ) -> CyclicalFractionalTestResult:
     """Run the scalar aggregate-ψ multi-cycle joint D search."""
-    r_candidates = find_top_periodogram_peaks(
+    r_candidates = _find_top_periodogram_peaks_excluding(
         periodogram,
         n_peaks=config.n_stochastic_cycles,
-        exclude_zero=config.exclude_zero_frequency,
+        ignored_rs=ignored_rs,
     )
     r_peak = int(r_candidates[0])
 
-    under_threshold_results: Optional[Dict[int, List[GridCandidateResult]]] = (
+    under_threshold_results: Optional[Dict[Tuple[int, ...], List[GridCandidateResult]]] = (
         {} if threshold_value is not None else None
     )
 
@@ -248,6 +281,7 @@ def _run_multi_cycle_fractional_test(
                     candidate,
                     threshold_value,
                     config.statistic_mode,
+                    config.return_residuals_for_threshold,
                 )
             n_evaluated += 1
     else:
@@ -271,6 +305,7 @@ def _run_multi_cycle_fractional_test(
                     candidate,
                     threshold_value,
                     config.statistic_mode,
+                    config.return_residuals_for_threshold,
                 )
             n_coarse += 1
 
@@ -304,6 +339,7 @@ def _run_multi_cycle_fractional_test(
                     candidate,
                     threshold_value,
                     config.statistic_mode,
+                    config.return_residuals_for_threshold,
                 )
             n_fine += 1
 
@@ -371,15 +407,102 @@ def _validate_threshold(threshold: Any) -> float:
     return value
 
 
+def _build_ignored_r_set(config: CyclicalTestConfig, T: int) -> set[int]:
+    """Return stochastic frequency indices excluded from candidate search."""
+    ignored_rs = set()
+    if config.exclude_zero_frequency:
+        ignored_rs.add(0)
+    if config.ignored_stochastic_rs is not None:
+        ignored_rs.update(int(value) for value in config.ignored_stochastic_rs)
+
+    out_of_range = sorted(value for value in ignored_rs if value < 0 or value >= T)
+    if out_of_range:
+        raise InvalidConfigurationError(
+            "ignored_stochastic_rs contains values outside the valid cycle range "
+            f"[0, {T - 1}]: {out_of_range}."
+        )
+    return ignored_rs
+
+
+def _find_periodogram_peak_excluding(
+    periodogram: np.ndarray,
+    ignored_rs: set[int],
+) -> int:
+    """Return the strongest searchable periodogram index after exclusions."""
+    per = np.asarray(periodogram, dtype=float)
+    available = _available_periodogram_indices(per, ignored_rs)
+    return int(available[np.argmax(per[available])])
+
+
+def _find_top_periodogram_peaks_excluding(
+    periodogram: np.ndarray,
+    *,
+    n_peaks: int,
+    ignored_rs: set[int],
+) -> np.ndarray:
+    """Return strongest searchable periodogram indices after exclusions."""
+    per = np.asarray(periodogram, dtype=float)
+    available = _available_periodogram_indices(per, ignored_rs)
+    if len(available) < n_peaks:
+        raise InvalidConfigurationError(
+            f"Need {n_peaks} stochastic cycle frequencies, but only "
+            f"{len(available)} remain after ignored_stochastic_rs filtering."
+        )
+    top_local = np.argsort(per[available])[-n_peaks:][::-1]
+    return available[top_local].astype(int)
+
+
+def _available_periodogram_indices(
+    periodogram: np.ndarray,
+    ignored_rs: set[int],
+) -> np.ndarray:
+    if periodogram.ndim != 1 or periodogram.size == 0:
+        raise InvalidConfigurationError("periodogram must be a non-empty 1-D array.")
+    if not np.all(np.isfinite(periodogram)):
+        raise InvalidConfigurationError("periodogram contains non-finite values.")
+
+    mask = np.ones(periodogram.size, dtype=bool)
+    for R in ignored_rs:
+        if R < periodogram.size:
+            mask[R] = False
+    available = np.flatnonzero(mask)
+    if available.size == 0:
+        raise InvalidConfigurationError(
+            "No periodogram frequencies remain after ignored_stochastic_rs filtering."
+        )
+    return available
+
+
+def _filter_ignored_r_candidates(
+    r_candidates: np.ndarray,
+    ignored_rs: set[int],
+) -> np.ndarray:
+    filtered = np.array(
+        [int(R) for R in np.asarray(r_candidates, dtype=int) if int(R) not in ignored_rs],
+        dtype=int,
+    )
+    if filtered.size == 0:
+        raise InvalidConfigurationError(
+            "No stochastic R candidates remain after ignored_stochastic_rs filtering."
+        )
+    return filtered
+
+
 def _record_if_under_threshold(
-    bucket: Dict[int, List[GridCandidateResult]],
+    bucket: Dict[Tuple[int, ...], List[GridCandidateResult]],
     candidate: GridCandidateResult,
     threshold: float,
     statistic_mode: str,
+    retain_residuals: bool,
 ) -> None:
-    """Append candidate to bucket[R] when its statistic score is below threshold."""
+    """Append candidate to its full R-tuple bucket when its score is below threshold."""
     if score_candidate(candidate, statistic_mode) < threshold:
-        bucket.setdefault(int(candidate.cycles[0].R), []).append(candidate)
+        key = tuple(int(cycle.R) for cycle in candidate.cycles)
+        bucket.setdefault(key, []).append(
+            candidate
+            if retain_residuals
+            else dataclasses.replace(candidate, residuals=None)
+        )
 
 
 def _log_multi_cycle_candidate(

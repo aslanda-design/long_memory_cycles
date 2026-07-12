@@ -31,6 +31,41 @@ def compute_document_periodogram(x: Any) -> Tuple[np.ndarray, np.ndarray]:
     return lambdas, periodogram
 
 
+def compute_autocorrelogram(
+    x: Any,
+    max_lag: int | None = None,
+    adjusted: bool = False,
+) -> Tuple[np.ndarray, np.ndarray]:
+    """Return sample autocorrelations for lags 0, ..., max_lag.
+
+    The series is demeaned before computing autocovariances. With
+    adjusted=False, lag-k autocovariances use the denominator T; with
+    adjusted=True, they use T-k. Autocorrelations are normalised by the
+    lag-0 autocovariance, so lag 0 is always 1.0.
+    """
+    arr = validate_series(x, min_length=2)
+    T = len(arr)
+    lag_limit = T - 1 if max_lag is None else max_lag
+    _validate_autocorrelogram_config(lag_limit, T, adjusted)
+
+    centered = arr - np.mean(arr)
+    denominator = float(np.dot(centered, centered))
+    if denominator <= 0.0:
+        raise InvalidConfigurationError(
+            "autocorrelogram is undefined for a constant series."
+        )
+
+    lags = np.arange(lag_limit + 1, dtype=int)
+    autocorrelations = np.empty(lag_limit + 1, dtype=float)
+    for lag in lags:
+        covariance = float(np.dot(centered[: T - lag], centered[lag:]))
+        autocorrelations[lag] = covariance / denominator
+        if adjusted and lag > 0:
+            autocorrelations[lag] *= T / (T - lag)
+    autocorrelations[0] = 1.0
+    return lags, autocorrelations
+
+
 def find_periodogram_peak(
     periodogram: np.ndarray,
     exclude_zero: bool = True,
@@ -628,6 +663,25 @@ def _validate_find_top_peaks(
         raise InvalidConfigurationError(
             f"n_peaks={n_peaks} exceeds the number of available frequencies "
             f"({n_available})."
+        )
+
+
+def _validate_autocorrelogram_config(
+    max_lag: int, series_length: int, adjusted: bool
+) -> None:
+    if isinstance(max_lag, bool) or not isinstance(max_lag, int):
+        raise InvalidConfigurationError(
+            f"max_lag must be an int, got {type(max_lag).__name__}."
+        )
+    if max_lag < 0:
+        raise InvalidConfigurationError(f"max_lag must be >= 0, got {max_lag}.")
+    if max_lag >= series_length:
+        raise InvalidConfigurationError(
+            f"max_lag must be smaller than series length {series_length}, got {max_lag}."
+        )
+    if not isinstance(adjusted, bool):
+        raise InvalidConfigurationError(
+            f"adjusted must be a bool, got {type(adjusted).__name__}."
         )
 
 

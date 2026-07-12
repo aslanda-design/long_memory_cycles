@@ -61,6 +61,38 @@ def validate_n_deterministic_cycles(n: Any) -> int:
     return n
 
 
+def validate_chebyshev_orders(orders: Any) -> Optional[tuple[int, ...]]:
+    """Check explicit deterministic Chebyshev orders, if provided."""
+    if orders is None:
+        return None
+    try:
+        order_list = list(orders)
+    except TypeError as exc:
+        raise InvalidConfigurationError(
+            f"chebyshev_orders must be an iterable of positive ints, got "
+            f"{type(orders).__name__}."
+        ) from exc
+    if len(order_list) == 0:
+        raise InvalidConfigurationError("chebyshev_orders must not be empty.")
+
+    validated: list[int] = []
+    for order in order_list:
+        if isinstance(order, bool) or not isinstance(order, (int, np.integer)):
+            raise InvalidConfigurationError(
+                f"chebyshev_orders must contain positive ints, got {order!r}."
+            )
+        order_int = int(order)
+        if order_int <= 0:
+            raise InvalidConfigurationError(
+                "chebyshev_orders must contain positive orders only; "
+                "use include_intercept=True for P_0."
+            )
+        validated.append(order_int)
+    if len(set(validated)) != len(validated):
+        raise InvalidConfigurationError("chebyshev_orders must not contain duplicates.")
+    return tuple(validated)
+
+
 def validate_n_stochastic_cycles(n: Any) -> int:
     """Check the requested number of simultaneous stochastic cycles."""
     if not isinstance(n, int) or isinstance(n, bool):
@@ -72,6 +104,39 @@ def validate_n_stochastic_cycles(n: Any) -> int:
             f"n_stochastic_cycles must be >= 1, got {n}."
         )
     return n
+
+
+def validate_ignored_stochastic_rs(values: Any) -> Optional[tuple[int, ...]]:
+    """Check stochastic frequency indices excluded from the search."""
+    if values is None:
+        return None
+    try:
+        value_list = list(values)
+    except TypeError as exc:
+        raise InvalidConfigurationError(
+            f"ignored_stochastic_rs must be an iterable of non-negative ints, got "
+            f"{type(values).__name__}."
+        ) from exc
+    if len(value_list) == 0:
+        raise InvalidConfigurationError("ignored_stochastic_rs must not be empty.")
+
+    validated: list[int] = []
+    for value in value_list:
+        if isinstance(value, bool) or not isinstance(value, (int, np.integer)):
+            raise InvalidConfigurationError(
+                f"ignored_stochastic_rs must contain ints, got {value!r}."
+            )
+        value_int = int(value)
+        if value_int < 0:
+            raise InvalidConfigurationError(
+                f"ignored_stochastic_rs must be >= 0, got {value_int}."
+            )
+        validated.append(value_int)
+    if len(set(validated)) != len(validated):
+        raise InvalidConfigurationError(
+            "ignored_stochastic_rs must not contain duplicates."
+        )
+    return tuple(validated)
 
 
 def validate_top_k(top_k: Any) -> int:
@@ -315,6 +380,7 @@ def validate_config(config: Any) -> "CyclicalTestConfig":
 
     validate_n_deterministic_cycles(config.n_deterministic_cycles)
     validate_boolean(config.include_intercept, "include_intercept")
+    validate_chebyshev_orders(config.chebyshev_orders)
     validate_d_grid(config.d_grid)
     validate_mode(config.d_search_strategy, _D_SEARCH_STRATEGIES, "d_search_strategy")
     validate_d_coarse_grid(config.d_coarse_grid)
@@ -328,9 +394,13 @@ def validate_config(config: Any) -> "CyclicalTestConfig":
         config.stochastic_cycle_mode, _STOCHASTIC_CYCLE_MODES, "stochastic_cycle_mode"
     )
     validate_n_stochastic_cycles(config.n_stochastic_cycles)
+    validate_ignored_stochastic_rs(config.ignored_stochastic_rs)
     validate_mode(config.error_model, _ERROR_MODELS, "error_model")
     validate_boolean(config.drop_singular_frequency, "drop_singular_frequency")
     validate_boolean(config.exclude_zero_frequency, "exclude_zero_frequency")
     validate_boolean(config.return_residuals_for_top_k, "return_residuals_for_top_k")
+    validate_boolean(
+        config.return_residuals_for_threshold, "return_residuals_for_threshold"
+    )
 
     return config

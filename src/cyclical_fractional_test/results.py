@@ -40,6 +40,7 @@ class GridCandidateResult:
     betas: Optional[np.ndarray] = None  # Estimated deterministic-cycle coefficients.
     residuals: Optional[np.ndarray] = None  # Regression residuals for this candidate.
     residual_sum_squares: Optional[float] = None  # Sum of squared residuals.
+    beta_standard_errors: Optional[np.ndarray] = None  # Standard errors for deterministic beta coefficients.
 
 
 @dataclass
@@ -63,7 +64,7 @@ class CyclicalFractionalTestResult:
 
     best_result: Optional[GridCandidateResult] = None  # Best candidate found.
     top_k_results: List[GridCandidateResult] = field(default_factory=list)  # Retained top-k candidates.
-    under_threshold_results: Optional[Dict[int, List[GridCandidateResult]]] = None  # Candidates scoring below the requested threshold, grouped by R; None when no threshold was requested.
+    under_threshold_results: Optional[Dict[Tuple[int, ...], List[GridCandidateResult]]] = None  # Candidates scoring below the requested threshold, grouped by full R tuple; None when no threshold was requested.
     r_peak: Optional[int] = None  # Main periodogram peak used to build the R grid.
     r_candidates: Optional[np.ndarray] = None  # R values considered around r_peak.
     d_grid: Optional[np.ndarray] = None  # D values evaluated in the grid.

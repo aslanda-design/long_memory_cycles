@@ -3,10 +3,14 @@ import pytest
 
 from cyclical_fractional_test.exceptions import InvalidConfigurationError
 from cyclical_fractional_test.regression import (
+    BetaSignificanceResult,
     RegressionResult,
+    compute_beta_standard_errors,
+    compute_beta_t_statistics,
     compute_residual_sum_squares,
     compute_residuals,
     compute_time_variance,
+    detect_beta_significance,
     estimate_ar_ols,
     estimate_innovation_variance,
     fit_filtered_regression,
@@ -91,6 +95,7 @@ def test_fit_output_shapes():
     y = rng.standard_normal(T)
     result = fit_filtered_regression(y, X)
     assert result.betas.shape == (p,)
+    assert result.beta_standard_errors.shape == (p,)
     assert result.fitted_values.shape == (T,)
     assert result.residuals.shape == (T,)
 
@@ -103,6 +108,8 @@ def test_fit_accepts_no_regressors():
     np.testing.assert_allclose(result.fitted_values, np.zeros_like(y))
     np.testing.assert_allclose(result.residuals, y)
     assert result.rank == 0
+    assert result.degrees_of_freedom == len(y)
+    assert result.beta_standard_errors.shape == (0,)
 
 
 def test_fit_returns_regression_result():
@@ -113,7 +120,21 @@ def test_fit_returns_regression_result():
 def test_fit_rank_and_condition_number_are_set():
     result = fit_filtered_regression(np.ones(4), np.eye(4))
     assert isinstance(result.rank, int)
+    assert isinstance(result.degrees_of_freedom, int)
     assert np.isfinite(result.condition_number)
+
+
+def test_fit_computes_beta_standard_errors():
+    x = np.arange(1.0, 8.0)
+    X = np.column_stack([np.ones_like(x), x])
+    y = np.array([2.0, 3.2, 3.9, 6.1, 7.9, 9.8, 11.2])
+
+    result = fit_filtered_regression(y, X)
+
+    sigma_squared = result.residual_sum_squares / (len(y) - result.rank)
+    expected = np.sqrt(np.diag(sigma_squared * np.linalg.pinv(X.T @ X)))
+    np.testing.assert_allclose(result.beta_standard_errors, expected)
+    assert result.degrees_of_freedom == len(y) - result.rank
 
 
 def test_fit_does_not_modify_inputs():
@@ -141,6 +162,61 @@ def test_fit_rejects_nan_in_inputs():
         fit_filtered_regression(np.array([1.0, float("nan"), 3.0]), np.ones((3, 1)))
     with pytest.raises((InvalidConfigurationError, ValueError)):
         fit_filtered_regression(np.ones(3), np.array([[1.0], [float("nan")], [3.0]]))
+
+
+# ---------------------------------------------------------------------------
+# beta standard errors and significance
+# ---------------------------------------------------------------------------
+
+
+def test_compute_beta_standard_errors_returns_nan_without_degrees_of_freedom():
+    X = np.eye(3)
+    residuals = np.zeros(3)
+
+    result = compute_beta_standard_errors(X, residuals, rank=3)
+
+    np.testing.assert_array_equal(np.isnan(result), np.ones(3, dtype=bool))
+
+
+def test_compute_beta_standard_errors_rejects_shape_mismatch():
+    with pytest.raises(InvalidConfigurationError):
+        compute_beta_standard_errors(np.ones((4, 2)), np.ones(3))
+
+
+def test_compute_beta_t_statistics_handles_zero_standard_error():
+    t_statistics = compute_beta_t_statistics(
+        np.array([2.0, 0.0]),
+        np.array([0.0, 0.0]),
+    )
+
+    assert np.isposinf(t_statistics[0])
+    assert np.isnan(t_statistics[1])
+
+
+def test_detect_beta_significance_uses_absolute_t_values():
+    result = detect_beta_significance(
+        betas=np.array([2.0, -2.0, 0.5, 0.0]),
+        standard_errors=np.array([1.0, 1.0, 1.0, 0.0]),
+    )
+
+    assert isinstance(result, BetaSignificanceResult)
+    np.testing.assert_allclose(result.t_statistics[:3], [2.0, -2.0, 0.5])
+    assert np.isnan(result.t_statistics[3])
+    np.testing.assert_array_equal(
+        result.significant,
+        np.array([True, True, False, False]),
+    )
+    assert result.critical_value == pytest.approx(1.645)
+
+
+def test_detect_beta_significance_accepts_custom_critical_value():
+    result = detect_beta_significance(
+        np.array([1.7]),
+        np.array([1.0]),
+        critical_value=2.0,
+    )
+
+    np.testing.assert_array_equal(result.significant, np.array([False]))
 
 
 # ---------------------------------------------------------------------------

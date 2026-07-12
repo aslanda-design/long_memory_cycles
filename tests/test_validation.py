@@ -10,6 +10,7 @@ from cyclical_fractional_test import (
 )
 from cyclical_fractional_test.validation import (
     validate_boolean,
+    validate_chebyshev_orders,
     validate_config,
     validate_cycle,
     validate_cycles,
@@ -17,6 +18,7 @@ from cyclical_fractional_test.validation import (
     validate_d_fine_radius,
     validate_d_fine_step,
     validate_d_grid,
+    validate_ignored_stochastic_rs,
     validate_mode,
     validate_n_deterministic_cycles,
     validate_n_stochastic_cycles,
@@ -103,6 +105,22 @@ def test_validate_n_deterministic_cycles_rejects_float():
         validate_n_deterministic_cycles(4.5)
 
 
+def test_validate_chebyshev_orders_accepts_positive_orders():
+    assert validate_chebyshev_orders([2, np.int64(5)]) == (2, 5)
+
+
+@pytest.mark.parametrize("bad_orders", [[], [0], [-1], [2, 2], [True], [1.5]])
+def test_validate_chebyshev_orders_rejects_invalid_values(bad_orders):
+    with pytest.raises(InvalidConfigurationError):
+        validate_chebyshev_orders(bad_orders)
+
+
+def test_validate_config_accepts_explicit_chebyshev_orders():
+    config = CyclicalTestConfig(chebyshev_orders=(2, 5), include_intercept=True)
+
+    assert validate_config(config) is config
+
+
 # ---------------------------------------------------------------------------
 # validate_n_stochastic_cycles
 # ---------------------------------------------------------------------------
@@ -121,6 +139,22 @@ def test_validate_n_stochastic_cycles_rejects_invalid_values(bad_n):
 def test_validate_config_rejects_bad_n_stochastic_cycles():
     with pytest.raises(InvalidConfigurationError):
         validate_config(CyclicalTestConfig(n_stochastic_cycles=0))
+
+
+def test_validate_ignored_stochastic_rs_accepts_non_negative_indices():
+    assert validate_ignored_stochastic_rs([0, np.int64(5)]) == (0, 5)
+
+
+@pytest.mark.parametrize("bad_rs", [[], [-1], [2, 2], [True], [1.5]])
+def test_validate_ignored_stochastic_rs_rejects_invalid_values(bad_rs):
+    with pytest.raises(InvalidConfigurationError):
+        validate_ignored_stochastic_rs(bad_rs)
+
+
+def test_validate_config_accepts_ignored_stochastic_rs():
+    config = CyclicalTestConfig(ignored_stochastic_rs=(5, 270))
+
+    assert validate_config(config) is config
 
 
 # ---------------------------------------------------------------------------

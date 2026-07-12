@@ -6,6 +6,8 @@ from cyclical_fractional_test import (
     CyclicalTestConfig,
     GridCandidateResult,
     StochasticCycle,
+    compute_autocorrelogram,
+    detect_beta_significance,
     run_cyclical_fractional_test,
 )
 from cyclical_fractional_test.diagnostics import PeriodogramSummary, TestDiagnostics
@@ -26,6 +28,7 @@ def test_grid_candidate_result_defaults_to_none():
     result = GridCandidateResult(cycles=(StochasticCycle(R=10, D=0.3),))
     assert result.test_value is None
     assert result.betas is None
+    assert result.beta_standard_errors is None
 
 
 def test_cyclical_result_empty_defaults():
@@ -38,12 +41,15 @@ def test_cyclical_result_empty_defaults():
 def test_config_default_values():
     cfg = CyclicalTestConfig()
     assert cfg.n_deterministic_cycles == 4
+    assert cfg.chebyshev_orders is None
     assert cfg.n_stochastic_cycles == 1
+    assert cfg.ignored_stochastic_rs is None
     assert cfg.top_k == 1
     assert cfg.stochastic_cycle_mode == "single"
     assert cfg.error_model == "white_noise"
     assert cfg.d_grid is None
     assert cfg.drop_singular_frequency is True
+    assert cfg.return_residuals_for_threshold is False
 
 
 def test_config_custom_values():
@@ -79,6 +85,14 @@ def _zero_dominant_series(T=60):
     return np.ones(T)
 
 
+def _cyclic_series(T=80, components=((4, 2.0), (7, 1.0), (11, 0.8))):
+    t = np.arange(T, dtype=float)
+    y = np.zeros(T, dtype=float)
+    for R, amplitude in components:
+        y += amplitude * np.cos(2.0 * np.pi * R * t / T)
+    return y
+
+
 def _fixed_config(**overrides):
     defaults = dict(
         n_deterministic_cycles=2,
@@ -102,6 +116,12 @@ def test_returns_cyclical_fractional_test_result():
         run_cyclical_fractional_test(_series(), config=_small_config()),
         CyclicalFractionalTestResult,
     )
+
+
+def test_compute_autocorrelogram_api_returns_lags_and_values():
+    lags, autocorr = compute_autocorrelogram(np.array([1.0, 2.0, 3.0]), max_lag=1)
+    np.testing.assert_array_equal(lags, np.array([0, 1]))
+    assert autocorr[0] == pytest.approx(1.0)
 
 
 def test_best_result_not_none():
@@ -131,6 +151,28 @@ def test_betas_length_matches_n_deterministic_cycles():
         ),
     )
     assert all(len(c.betas) == 3 for c in result.top_k_results)
+    assert all(c.beta_standard_errors.shape == (3,) for c in result.top_k_results)
+
+
+def test_explicit_chebyshev_orders_control_beta_length():
+    result = run_cyclical_fractional_test(
+        _series(),
+        config=CyclicalTestConfig(
+            n_deterministic_cycles=99,
+            chebyshev_orders=(2, 5),
+            include_intercept=True,
+            d_grid=np.array([0.0, 0.5]),
+            r_window=1,
+            top_k=2,
+            stochastic_cycle_mode="single",
+        ),
+    )
+
+    assert all(candidate.betas.shape == (3,) for candidate in result.top_k_results)
+    assert all(
+        candidate.beta_standard_errors.shape == (3,)
+        for candidate in result.top_k_results
+    )
 
 
 def test_include_intercept_adds_extra_beta():
@@ -176,6 +218,16 @@ def test_zero_deterministic_cycles_without_intercept_fits_no_betas():
         ),
     )
     assert all(c.betas.shape == (0,) for c in result.top_k_results)
+    assert all(c.beta_standard_errors.shape == (0,) for c in result.top_k_results)
+
+
+def test_top_level_detect_beta_significance_export():
+    result = detect_beta_significance(
+        np.array([2.0]),
+        np.array([1.0]),
+    )
+
+    np.testing.assert_array_equal(result.significant, np.array([True]))
 
 
 def test_all_test_values_are_finite():
@@ -338,6 +390,61 @@ def test_multi_cycle_can_include_zero_frequency_when_included():
     assert 0 in cycle_Rs
     assert 0 in set(int(R) for R in result.r_candidates)
     assert np.isfinite(result.best_result.test_value)
+
+
+def test_ignored_stochastic_rs_excludes_single_cycle_peak_and_grid_candidate():
+    result = run_cyclical_fractional_test(
+        _cyclic_series(),
+        config=CyclicalTestConfig(
+            n_deterministic_cycles=0,
+            d_search_strategy="fixed_grid",
+            d_grid=np.array([0.0]),
+            r_window=0,
+            stochastic_cycle_mode="single",
+            ignored_stochastic_rs=(4,),
+        ),
+    )
+
+    assert result.r_peak == 7
+    assert list(result.r_candidates) == [7]
+    assert result.best_result.cycles[0].R == 7
+
+
+def test_ignored_stochastic_rs_excludes_multi_cycle_top_peak():
+    result = run_cyclical_fractional_test(
+        _cyclic_series(),
+        config=CyclicalTestConfig(
+            n_deterministic_cycles=0,
+            d_search_strategy="fixed_grid",
+            d_grid=np.array([0.0]),
+            top_k=1,
+            stochastic_cycle_mode="multi_cycle",
+            n_stochastic_cycles=2,
+            ignored_stochastic_rs=(4,),
+        ),
+    )
+
+    assert tuple(result.r_candidates) == (7, 11)
+    assert [cycle.R for cycle in result.best_result.cycles] == [7, 11]
+
+
+def test_ignored_stochastic_rs_rejects_out_of_range_frequency():
+    with pytest.raises(InvalidConfigurationError):
+        run_cyclical_fractional_test(
+            _series(T=30),
+            config=CyclicalTestConfig(ignored_stochastic_rs=(30,)),
+        )
+
+
+def test_ignored_stochastic_rs_rejects_when_no_search_frequencies_remain():
+    with pytest.raises(InvalidConfigurationError):
+        run_cyclical_fractional_test(
+            _series(T=10),
+            config=CyclicalTestConfig(
+                exclude_zero_frequency=False,
+                ignored_stochastic_rs=tuple(range(5)),
+            ),
+        )
 
 
 def test_multi_cycle_fixed_grid_evaluates_joint_d_candidates(monkeypatch):
@@ -732,13 +839,13 @@ def test_threshold_none_yields_no_under_threshold_results():
     assert result.under_threshold_results is None
 
 
-def test_threshold_groups_all_candidates_by_r_when_large():
+def test_threshold_groups_all_candidates_by_frequency_tuple_when_large():
     config = _fixed_config(d_grid=np.array([0.0, 0.3, 0.7, 1.0]))
     result = run_cyclical_fractional_test(_series(T=60, seed=1), config=config, threshold=1e9)
     utr = result.under_threshold_results
     assert utr is not None
-    # A huge threshold keeps every evaluated candidate; keys are exactly the R grid.
-    assert set(utr.keys()) == {int(r) for r in result.r_candidates}
+    # A huge threshold keeps every evaluated candidate; single-cycle keys are (R,).
+    assert set(utr.keys()) == {(int(r),) for r in result.r_candidates}
     assert sum(len(cands) for cands in utr.values()) == result.n_candidates_evaluated
     assert all(abs(c.test_value) < 1e9 for cands in utr.values() for c in cands)
 
@@ -774,13 +881,65 @@ def test_threshold_adaptive_collects_multiple_d_per_r():
     )
     utr = result.under_threshold_results
     assert utr is not None
-    # Single R (r_window=0); a huge threshold keeps every evaluated D for that R.
+    # Single R (r_window=0); a huge threshold keeps every evaluated D for key (R,).
     assert len(utr) == 1
+    (key,) = utr.keys()
+    assert len(key) == 1
     (cands,) = utr.values()
     assert len(cands) == result.n_candidates_evaluated
     assert len(cands) > 1
     assert len({c.cycles[0].R for c in cands}) == 1
     assert len({round(c.cycles[0].D, 12) for c in cands}) == len(cands)
+
+
+def test_threshold_can_store_lightweight_candidates_without_residuals():
+    result = run_cyclical_fractional_test(
+        _series(T=60, seed=7),
+        config=_small_config(
+            r_window=0,
+            top_k=1,
+            return_residuals_for_threshold=False,
+        ),
+        threshold=1e9,
+    )
+    grouped = result.under_threshold_results
+    assert grouped is not None
+    candidates = [candidate for bucket in grouped.values() for candidate in bucket]
+    assert len(candidates) == result.n_candidates_evaluated
+    assert all(candidate.betas is not None for candidate in candidates)
+    assert all(candidate.beta_standard_errors is not None for candidate in candidates)
+    assert all(candidate.residuals is None for candidate in candidates)
+    assert result.best_result is not None
+    assert result.best_result.residuals is not None
+
+
+def test_threshold_multi_cycle_groups_joint_candidates_by_full_r_tuple():
+    config = CyclicalTestConfig(
+        n_deterministic_cycles=2,
+        d_search_strategy="fixed_grid",
+        d_grid=np.array([0.0, 0.5]),
+        top_k=3,
+        stochastic_cycle_mode="multi_cycle",
+        n_stochastic_cycles=2,
+    )
+
+    result = run_cyclical_fractional_test(
+        _series(T=60, seed=11), config=config, threshold=1e9
+    )
+
+    utr = result.under_threshold_results
+    assert utr is not None
+    expected_key = tuple(int(r) for r in result.r_candidates)
+    assert set(utr.keys()) == {expected_key}
+    assert sum(len(cands) for cands in utr.values()) == result.n_candidates_evaluated
+    (cands,) = utr.values()
+    assert all(len(candidate.cycles) == 2 for candidate in cands)
+    assert all(
+        tuple(cycle.R for cycle in candidate.cycles) == expected_key
+        for candidate in cands
+    )
+    scores = [abs(candidate.test_value) for candidate in cands]
+    assert scores == sorted(scores)
 
 
 @pytest.mark.parametrize("bad_threshold", [0.0, -1.0, float("nan"), float("inf"), True])

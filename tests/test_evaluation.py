@@ -49,6 +49,7 @@ def test_output_shapes():
     y, X = _make_y_X(T=T, p=p)
     result = evaluate_candidate(y, X, (StochasticCycle(R=2, D=0.3),), _config())
     assert result.betas.shape == (p,)
+    assert result.beta_standard_errors.shape == (p,)
     assert result.residuals.shape == (T,)
 
 
@@ -65,6 +66,9 @@ def test_D_zero_matches_direct_ols():
     result = evaluate_candidate(y, X, (StochasticCycle(R=2, D=0.0),), _config())
     direct = fit_filtered_regression(y, X)
     np.testing.assert_allclose(result.betas, direct.betas, atol=1e-10)
+    np.testing.assert_allclose(
+        result.beta_standard_errors, direct.beta_standard_errors, atol=1e-10
+    )
     np.testing.assert_allclose(result.residuals, direct.residuals, atol=1e-10)
 
 
