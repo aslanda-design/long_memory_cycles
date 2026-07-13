@@ -120,6 +120,18 @@ def test_fractional_coefficients_dynamic_matches_direct():
     np.testing.assert_allclose(result, expected)
 
 
+def test_fractional_coefficients_multi_peak_mode_uses_single_cycle_path():
+    T, R, D = 20, 3, 0.4
+    cycles = [StochasticCycle(R=R, D=D)]
+    expected = compute_fractional_coefficients_single_cycle(T, R, D)
+
+    result = compute_fractional_coefficients_dynamic(
+        T, cycles, mode="multi_peak_single_cycle"
+    )
+
+    np.testing.assert_allclose(result, expected)
+
+
 def test_fractional_coefficients_multi_cycle_matches_truncated_convolution():
     T = 12
     cycles = [StochasticCycle(R=2, D=0.4), StochasticCycle(R=4, D=0.2)]
@@ -265,6 +277,19 @@ def test_apply_filter_dynamic_single_mode_matches_direct():
     cycles = [StochasticCycle(R=2, D=0.5)]
     expected = apply_single_cycle_filter(x, cycles[0], T)
     np.testing.assert_allclose(apply_filter_dynamic(x, cycles, T, mode="single"), expected)
+
+
+def test_apply_filter_dynamic_multi_peak_mode_matches_direct():
+    T = 10
+    x = np.random.default_rng(10).standard_normal(T)
+    cycles = [StochasticCycle(R=2, D=0.5)]
+    expected = apply_single_cycle_filter(x, cycles[0], T)
+
+    result = apply_filter_dynamic(
+        x, cycles, T, mode="multi_peak_single_cycle"
+    )
+
+    np.testing.assert_allclose(result, expected)
 
 
 def test_multi_cycle_coefficients_match_chained_filter():

@@ -37,6 +37,8 @@ class VarianceComparison:
 class TestDiagnostics:
     """Run-level diagnostic summary attached to CyclicalFractionalTestResult."""
 
+    __test__ = False
+
     n_candidates_evaluated: int  # Total candidates passed to evaluate_candidate.
     n_valid_candidates: int  # Candidates that returned a finite result.
     n_failed_candidates: int  # Candidates that raised an error (0 under Policy A).

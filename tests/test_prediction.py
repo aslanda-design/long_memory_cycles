@@ -149,6 +149,51 @@ def test_forecast_continuation_recursion_boundary():
     np.testing.assert_allclose(fut[0], expected_first, atol=1e-10)
 
 
+def test_forecast_multi_cycle_boundary_uses_combined_filter():
+    rng = np.random.default_rng(12)
+    y = rng.standard_normal(48)
+    X = np.column_stack([np.ones_like(y), np.linspace(-1.0, 1.0, len(y))])
+    betas = np.array([0.2, -0.3])
+    residuals = rng.standard_normal(len(y))
+    ar = np.array([])
+    cycles = (
+        StochasticCycle(R=4, D=0.25),
+        StochasticCycle(R=9, D=0.15),
+    )
+    T = len(y)
+
+    from cyclical_fractional_test.filters import (
+        compute_fractional_coefficients_from_mu,
+        compute_mu,
+    )
+
+    combined = np.zeros(T + 1)
+    combined[0] = 1.0
+    for cycle in cycles:
+        coeffs = compute_fractional_coefficients_from_mu(
+            compute_mu(T, cycle.R), cycle.D, T + 1
+        )
+        combined = np.convolve(combined, coeffs, mode="full")[: T + 1]
+    S = y - X.dot(betas)
+    s_next = -np.dot(combined[1 : T + 1], S[::-1])
+    X_future = np.array([[1.0, 1.1]])
+    expected_first = X_future.dot(betas)[0] + s_next
+
+    fut = forecast_out_of_sample(
+        y,
+        X,
+        X_future,
+        cycles,
+        betas,
+        residuals,
+        ar,
+        "multi_cycle",
+        1,
+    )
+
+    np.testing.assert_allclose(fut[0], expected_first, atol=1e-10)
+
+
 # ---------------------------------------------------------------------------
 # compute_ma_weights
 # ---------------------------------------------------------------------------
@@ -164,6 +209,39 @@ def test_ma_weights_d_zero_white_noise_is_unit_impulse():
     expected = np.zeros(5)
     expected[0] = 1.0
     np.testing.assert_allclose(weights, expected, atol=1e-12)
+
+
+def test_ma_weights_multi_cycle_matches_inverse_filter_and_ar_convolution():
+    cycles = (
+        StochasticCycle(R=5, D=0.3),
+        StochasticCycle(R=11, D=0.2),
+    )
+    phi = np.array([0.4])
+    T_ref = 96
+    length = 8
+
+    from cyclical_fractional_test.filters import (
+        compute_fractional_coefficients_from_mu,
+        compute_mu,
+    )
+
+    inverse_filter = np.zeros(length)
+    inverse_filter[0] = 1.0
+    for cycle in cycles:
+        coeffs = compute_fractional_coefficients_from_mu(
+            compute_mu(T_ref, cycle.R), -cycle.D, length
+        )
+        inverse_filter = np.convolve(inverse_filter, coeffs, mode="full")[:length]
+
+    ar_weights = np.zeros(length)
+    ar_weights[0] = 1.0
+    for lag in range(1, length):
+        ar_weights[lag] = phi[0] * ar_weights[lag - 1]
+    expected = np.convolve(inverse_filter, ar_weights, mode="full")[:length]
+
+    result = compute_ma_weights(cycles, phi, "multi_cycle", T_ref, length)
+
+    np.testing.assert_allclose(result, expected, atol=1e-12)
 
 
 # ---------------------------------------------------------------------------
