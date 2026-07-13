@@ -21,6 +21,7 @@ from .spectral import (
 from .validation import validate_config
 
 _ERROR_MODEL_ORDERS = {"white_noise": 0, "ar1": 1, "ar2": 2}
+_FREQUENCY_STATISTIC_MODES = {"frequency", "test_star"}
 
 
 def evaluate_candidate(
@@ -64,7 +65,13 @@ def evaluate_candidate(
     )
 
     test_value = compute_test_statistic(T, xa, xaa, variance_time)
-    test_star_value = compute_test_star_statistic(T, xa, xaa, variance_frequency)
+    test_star_value = _compute_test_star_for_candidate(
+        T,
+        xa,
+        xaa,
+        variance_frequency,
+        config.statistic_mode,
+    )
 
     return GridCandidateResult(
         cycles=cycles_t,
@@ -83,6 +90,24 @@ def evaluate_candidate(
         residuals=reg.residuals,
         residual_sum_squares=reg.residual_sum_squares,
     )
+
+
+def _compute_test_star_for_candidate(
+    T: int,
+    xa: float,
+    xaa: float,
+    variance_frequency: float,
+    statistic_mode: str,
+) -> float:
+    """Return TEST* when VAR* is usable; otherwise leave it undefined for TEST ranking."""
+    if variance_frequency > np.finfo(float).eps:
+        return compute_test_star_statistic(T, xa, xaa, variance_frequency)
+    if statistic_mode in _FREQUENCY_STATISTIC_MODES:
+        raise InvalidConfigurationError(
+            "TEST* is undefined because variance_frequency is numerically zero; "
+            "use statistic_mode='test' for this degenerate candidate."
+        )
+    return float("nan")
 
 
 def evaluate_r_with_adaptive_d(

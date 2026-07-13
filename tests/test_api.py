@@ -330,6 +330,7 @@ def test_zero_frequency_can_be_selected_when_included():
     np.testing.assert_array_equal(result.r_candidates, np.array([0]))
     assert result.best_result.cycles[0].R == 0
     assert np.isfinite(result.best_result.test_value)
+    assert np.isnan(result.best_result.test_star_value)
 
 
 def test_multi_cycle_mode_runs_and_selects_requested_cycles():
@@ -390,6 +391,24 @@ def test_multi_cycle_can_include_zero_frequency_when_included():
     assert 0 in cycle_Rs
     assert 0 in set(int(R) for R in result.r_candidates)
     assert np.isfinite(result.best_result.test_value)
+    assert np.isnan(result.best_result.test_star_value)
+
+
+def test_zero_frequency_degenerate_variance_rejects_test_star_ranking():
+    with pytest.raises(InvalidConfigurationError):
+        run_cyclical_fractional_test(
+            _zero_dominant_series(T=60),
+            config=CyclicalTestConfig(
+                n_deterministic_cycles=2,
+                d_search_strategy="fixed_grid",
+                d_grid=np.array([0.0]),
+                r_window=0,
+                top_k=1,
+                stochastic_cycle_mode="single",
+                exclude_zero_frequency=False,
+                statistic_mode="test_star",
+            ),
+        )
 
 
 def test_ignored_stochastic_rs_excludes_single_cycle_peak_and_grid_candidate():
